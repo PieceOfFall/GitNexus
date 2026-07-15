@@ -29,6 +29,8 @@ import {
   type JavaResolveContext,
 } from './index.js';
 import { populateJavaPackageSiblings } from './package-siblings.js';
+import { attachSpringBeanCandidateMetadata } from './spring-bean-metadata.js';
+import { applyJavaCaptureSideChannel } from './capture-side-channel.js';
 
 const javaScopeResolver: ScopeResolver = {
   language: SupportedLanguages.Java,
@@ -50,6 +52,7 @@ const javaScopeResolver: ScopeResolver = {
   buildMro: buildJavaMro,
 
   populateOwners: (parsed: ParsedFile) => populateClassOwnedMembers(parsed),
+  applyCaptureSideChannel: applyJavaCaptureSideChannel,
 
   isSuperReceiver: (text) => text.trim() === 'super',
 
@@ -61,6 +64,7 @@ const javaScopeResolver: ScopeResolver = {
 
   populateNamespaceSiblings: populateJavaPackageSiblings,
   populateRangeBindings: populateJavaCrossFileReturnTypes,
+  emitPostResolutionEdges: attachSpringBeanCandidateMetadata,
 };
 
 export { javaScopeResolver };

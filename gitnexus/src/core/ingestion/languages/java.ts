@@ -15,7 +15,6 @@ import type { AstFrameworkPatternConfig } from '../language-provider.js';
 import { createLeadingDocDescriptionExtractor } from '../utils/ast-helpers.js';
 import { javaTypeConfig } from '../type-extractors/jvm.js';
 import { extractSpringRoutes, extractSpringTypes } from '../route-extractors/spring.js';
-import { extractSpringFrameworkAnnotations } from './java/spring-bean-metadata.js';
 import { javaExportChecker } from '../export-detection.js';
 import { createImportResolver } from '../import-resolvers/resolver-factory.js';
 import { javaImportConfig } from '../import-resolvers/configs/jvm.js';
@@ -29,6 +28,8 @@ import { javaMethodConfig } from '../method-extractors/configs/jvm.js';
 import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { javaVariableConfig } from '../variable-extractors/configs/jvm.js';
 import { createJavaCfgVisitor } from '../cfg/visitors/java.js';
+import { assertCloneable } from '../workers/clone-safety.js';
+import { collectJavaCaptureSideChannel } from './java/capture-side-channel.js';
 import type { SymbolDefinition } from 'gitnexus-shared';
 import {
   emitJavaScopeCaptures,
@@ -117,16 +118,14 @@ export const javaProvider = defineLanguage({
   fieldExtractor: createFieldExtractor(javaConfig),
   methodExtractor: createMethodExtractor(javaMethodConfig),
   variableExtractor: createVariableExtractor(javaVariableConfig),
-  classExtractor: createClassExtractor({
-    ...javaClassConfig,
-    extractFrameworkAnnotations: extractSpringFrameworkAnnotations,
-  }),
+  classExtractor: createClassExtractor(javaClassConfig),
 
   // ── Javadoc → description (issue #2270) ──
   descriptionExtractor: createLeadingDocDescriptionExtractor(),
 
   // ── RFC #909 Ring 3: scope-based resolution hooks ──
   emitScopeCaptures: emitJavaScopeCaptures,
+  collectCaptureSideChannel: (filePath) => assertCloneable(collectJavaCaptureSideChannel(filePath)),
 
   // ── PDG: per-function CFG + def/use harvest (#2195 U4) ──
   cfgVisitor: createJavaCfgVisitor(),

@@ -12,7 +12,7 @@ describe('Spring Bean candidate inventory pipeline', () => {
     result = await runPipelineFromRepo(FIXTURE, () => {}, {});
   }, 60_000);
 
-  it('attaches canonical framework annotations to the six supported Classes', () => {
+  it('attaches canonical framework annotations after Java import resolution', () => {
     const classes = new Map<string, Record<string, unknown>>();
     result.graph.forEachNode((node) => {
       if (node.label === 'Class') classes.set(String(node.properties.name), node.properties);
@@ -36,9 +36,27 @@ describe('Spring Bean candidate inventory pipeline', () => {
     expect(classes.get('AppConfiguration')?.frameworkAnnotations).toEqual([
       'org.springframework.context.annotation.Configuration',
     ]);
+    expect(classes.get('NestedService')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
+    expect(classes.get('ExplicitAlongsideWildcard')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
+    expect(classes.get('WildcardService')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
 
-    expect(classes.get('PlainUtility')).not.toHaveProperty('frameworkAnnotations');
-    expect(classes.get('WildcardCandidate')).not.toHaveProperty('frameworkAnnotations');
+    for (const name of [
+      'PlainUtility',
+      'WildcardCandidate',
+      'MemberShadowedService',
+      'ConflictingBean',
+      'ComposedService',
+      'ExplicitCustomService',
+      'TopLevelShadowedComponent',
+    ]) {
+      expect(classes.get(name)).not.toHaveProperty('frameworkAnnotations');
+    }
   });
 
   it('keeps RestController route discovery and HANDLES_ROUTE emission intact', () => {

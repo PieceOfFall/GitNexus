@@ -1,141 +1,131 @@
-import Parser from 'tree-sitter';
-import Java from 'tree-sitter-java';
+import type { ParsedFile, ScopeId } from 'gitnexus-shared';
+import type { KnowledgeGraph } from '../../../graph/types.js';
+import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
+import type { GraphNodeLookup } from '../../scope-resolution/graph-bridge/node-lookup.js';
+import { resolveDefGraphId } from '../../scope-resolution/graph-bridge/ids.js';
+import { isClassLike, lookupBindingsAt } from '../../scope-resolution/scope/walkers.js';
+import { getJavaClassAnnotationFacts } from './capture-side-channel.js';
 import { SPRING_BEAN_STEREOTYPES } from './spring-bean-stereotypes.js';
 
-const IMPORT_DECLARATION_QUERY = new Parser.Query(Java, '(import_declaration) @import');
-
-interface JavaImports {
-  explicitBySimpleName: Map<string, Set<string>>;
-  topLevelDeclaredTypeNames: Set<string>;
-}
-
-const IMPORTS_BY_TREE = new WeakMap<Parser.Tree, JavaImports>();
-const TYPE_DECLARATIONS = new Set([
-  'annotation_type_declaration',
-  'class_declaration',
-  'enum_declaration',
-  'interface_declaration',
-  'record_declaration',
-]);
-const TYPE_BODY_NODES = new Set([
-  'annotation_type_body',
-  'class_body',
-  'enum_body_declarations',
-  'interface_body',
-]);
-
-function collectJavaImports(tree: Parser.Tree): JavaImports {
-  const explicitBySimpleName = new Map<string, Set<string>>();
-  const topLevelDeclaredTypeNames = new Set<string>();
-
-  for (const child of tree.rootNode.namedChildren) {
-    if (!TYPE_DECLARATIONS.has(child.type)) continue;
-    const name = child.childForFieldName('name')?.text.trim();
-    if (name) topLevelDeclaredTypeNames.add(name);
-  }
-
-  for (const match of IMPORT_DECLARATION_QUERY.matches(tree.rootNode)) {
-    const importNode = match.captures.find((capture) => capture.name === 'import')?.node;
-    if (!importNode) continue;
-
-    // Static imports cannot bring annotation types into scope. Parsing the AST
-    // node text keeps this extractor independent from Java's import resolver.
-    const parsed = /^import\s+(?!static\s)([A-Za-z0-9_$.]+?)(\.\*)?\s*;$/.exec(
-      importNode.text.trim(),
-    );
-    if (!parsed) continue;
-
-    const importedName = parsed[1];
-    if (parsed[2]) {
-      // On-demand imports are ambiguous without same-package and classpath
-      // resolution, so this syntax-only extractor deliberately ignores them.
-      continue;
-    }
-
-    const simpleName = importedName.split('.').pop();
-    if (!simpleName) continue;
-    const imports = explicitBySimpleName.get(simpleName) ?? new Set<string>();
-    imports.add(importedName);
-    explicitBySimpleName.set(simpleName, imports);
-  }
-
-  return { explicitBySimpleName, topLevelDeclaredTypeNames };
-}
-
-function importsFor(tree: Parser.Tree): JavaImports {
-  const cached = IMPORTS_BY_TREE.get(tree);
-  if (cached) return cached;
-
-  // Class extraction visits each declaration separately. Cache the file-level
-  // scan so nested and sibling classes do not rescan the same tree.
-  const imports = collectJavaImports(tree);
-  IMPORTS_BY_TREE.set(tree, imports);
-  return imports;
-}
-
-function hasEnclosingMemberType(annotation: Parser.SyntaxNode, simpleName: string): boolean {
-  for (let ancestor = annotation.parent; ancestor; ancestor = ancestor.parent) {
-    if (!TYPE_BODY_NODES.has(ancestor.type)) continue;
-
-    for (const member of ancestor.namedChildren) {
-      if (!TYPE_DECLARATIONS.has(member.type)) continue;
-      if (member.childForFieldName('name')?.text.trim() === simpleName) return true;
-    }
+function hasLexicalTypeDeclaration(
+  startScope: ScopeId | null,
+  simpleName: string,
+  indexes: ScopeResolutionIndexes,
+): boolean {
+  let scopeId = startScope;
+  const visited = new Set<ScopeId>();
+  while (scopeId !== null && !visited.has(scopeId)) {
+    visited.add(scopeId);
+    const scope = indexes.scopeTree.getScope(scopeId);
+    if (scope === undefined) return false;
+    const locals = scope.bindings.get(simpleName);
+    if (locals?.some(({ def }) => isClassLike(def.type) || def.type === 'Annotation')) return true;
+    scopeId = scope.parent;
   }
   return false;
 }
 
-function declarationAnnotations(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
-  const modifiers = node.namedChildren.find((child) => child.type === 'modifiers');
-  if (!modifiers) return [];
-  return modifiers.namedChildren.filter(
-    (child) => child.type === 'annotation' || child.type === 'marker_annotation',
+function explicitImportTargets(parsed: ParsedFile, simpleName: string): ReadonlySet<string> {
+  const targets = new Set<string>();
+  for (const entry of parsed.parsedImports) {
+    if (entry.kind !== 'named' && entry.kind !== 'alias') continue;
+    if (entry.localName !== simpleName || entry.targetIncludesImportedName !== true) continue;
+    targets.add(entry.targetRaw);
+  }
+  return targets;
+}
+
+function hasVisibleTypeBinding(
+  startScope: ScopeId | null,
+  simpleName: string,
+  indexes: ScopeResolutionIndexes,
+): boolean {
+  let scopeId = startScope;
+  const visited = new Set<ScopeId>();
+  while (scopeId !== null && !visited.has(scopeId)) {
+    visited.add(scopeId);
+    const scope = indexes.scopeTree.getScope(scopeId);
+    if (scope === undefined) return false;
+    const visible = lookupBindingsAt(scopeId, simpleName, indexes);
+    if (visible.some(({ def }) => isClassLike(def.type) || def.type === 'Annotation')) return true;
+    scopeId = scope.parent;
+  }
+  return false;
+}
+
+function wildcardImportTarget(parsed: ParsedFile, simpleName: string): string | undefined {
+  const wildcardPackages = new Set(
+    parsed.parsedImports
+      .filter((entry) => entry.kind === 'wildcard')
+      .map((entry) => entry.targetRaw.replace(/\.\*$/, '')),
   );
+  if (wildcardPackages.size !== 1) return undefined;
+  const [packageName] = wildcardPackages;
+  const target = `${packageName}.${simpleName}`;
+  return SPRING_BEAN_STEREOTYPES.has(target) ? target : undefined;
 }
 
-function resolveSpringStereotype(
-  annotation: Parser.SyntaxNode,
-  imports: JavaImports,
+function resolveSpringAnnotation(
+  rawName: string,
+  parsed: ParsedFile,
+  enclosingScope: ScopeId | null,
+  indexes: ScopeResolutionIndexes,
 ): string | undefined {
-  const annotationName = annotation.childForFieldName('name')?.text.trim();
-  if (!annotationName) return undefined;
-
-  // Fully-qualified annotations require an exact allow-list match.
-  if (annotationName.includes('.')) {
-    return SPRING_BEAN_STEREOTYPES.has(annotationName) ? annotationName : undefined;
+  if (rawName.includes('.')) {
+    return SPRING_BEAN_STEREOTYPES.has(rawName) ? rawName : undefined;
   }
 
-  // Top-level and enclosing member types can hide an imported annotation name.
-  // Fail closed instead of attempting Java name resolution without a compiler.
-  if (
-    imports.topLevelDeclaredTypeNames.has(annotationName) ||
-    hasEnclosingMemberType(annotation, annotationName)
-  ) {
-    return undefined;
-  }
+  if (hasLexicalTypeDeclaration(enclosingScope, rawName, indexes)) return undefined;
 
-  const explicitImports = imports.explicitBySimpleName.get(annotationName);
-  if (explicitImports) {
-    // Ambiguous duplicate imports fail closed instead of guessing.
+  // External Spring classes are normally outside the indexed repository, so
+  // finalized bindings may remain unresolved. ParsedImport retains the exact
+  // source while the resolved scope chain above supplies Java shadowing rules.
+  const explicitImports = explicitImportTargets(parsed, rawName);
+  if (explicitImports.size > 0) {
     if (explicitImports.size !== 1) return undefined;
-    const [explicitImport] = explicitImports;
-    return SPRING_BEAN_STEREOTYPES.has(explicitImport) ? explicitImport : undefined;
+    const [imported] = explicitImports;
+    return SPRING_BEAN_STEREOTYPES.has(imported) ? imported : undefined;
   }
-  return undefined;
+
+  const wildcardTarget = wildcardImportTarget(parsed, rawName);
+  if (wildcardTarget === undefined) return undefined;
+
+  // Same-package types and resolved wildcard imports are available only after
+  // finalize/populateNamespaceSiblings. Any such binding wins over guessing
+  // that an unresolved external Spring wildcard supplied the annotation.
+  return hasVisibleTypeBinding(enclosingScope, rawName, indexes) ? undefined : wildcardTarget;
 }
 
-/** Return canonical Spring stereotype evidence for one Java class declaration. */
-export function extractSpringFrameworkAnnotations(node: Parser.SyntaxNode): string[] | undefined {
-  if (node.type !== 'class_declaration') return undefined;
+/** Attach Spring stereotype evidence after Java cross-file resolution is complete. */
+export function attachSpringBeanCandidateMetadata(
+  graph: KnowledgeGraph,
+  parsedFiles: readonly ParsedFile[],
+  nodeLookup: GraphNodeLookup,
+  indexes: ScopeResolutionIndexes,
+): void {
+  for (const parsed of parsedFiles) {
+    for (const fact of getJavaClassAnnotationFacts(parsed.filePath)) {
+      const classScope = indexes.scopeTree.getScope(fact.classScopeId);
+      if (classScope === undefined || classScope.kind !== 'Class') continue;
+      const classDef = classScope.ownedDefs.find((def) => def.type === 'Class');
+      if (classDef === undefined) continue;
 
-  const imports = importsFor(node.tree);
-  const recognized = new Set<string>();
-  for (const annotation of declarationAnnotations(node)) {
-    const fqn = resolveSpringStereotype(annotation, imports);
-    if (fqn) recognized.add(fqn);
+      const graphId = resolveDefGraphId(parsed.filePath, classDef, nodeLookup);
+      if (graphId === undefined) continue;
+      const classNode = graph.getNode(graphId);
+      if (classNode === undefined || classNode.label !== 'Class') continue;
+
+      const recognized = new Set<string>();
+      for (const rawName of fact.annotationNames) {
+        const annotation = resolveSpringAnnotation(rawName, parsed, classScope.parent, indexes);
+        if (annotation !== undefined) recognized.add(annotation);
+      }
+
+      // Conflicting stereotypes are omitted instead of making source order
+      // decide which Bean role downstream MCP responses expose.
+      if (recognized.size === 1) {
+        classNode.properties.frameworkAnnotations = [...recognized];
+      }
+    }
   }
-
-  // Choosing one of multiple stereotypes would make downstream metadata
-  // dependent on source order, so conflicting evidence is omitted.
-  return recognized.size === 1 ? [...recognized] : undefined;
 }
