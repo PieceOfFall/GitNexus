@@ -492,8 +492,7 @@ export interface ParseWorkerInput {
 }
 
 type WorkerIncomingMessage =
-  | { type: 'sub-batch'; files: ParseWorkerInput[] }
-  | { type: 'flush'; chunkHash?: string };
+  { type: 'sub-batch'; files: ParseWorkerInput[] } | { type: 'flush'; chunkHash?: string };
 
 // ============================================================================
 // Worker-local parser + language map
@@ -2402,6 +2401,10 @@ const processFileGroup = (
               }
             : {}),
           ...(description !== undefined ? { description } : {}),
+          ...(extractedClassSymbol?.frameworkAnnotations !== undefined &&
+          extractedClassSymbol.frameworkAnnotations.length > 0
+            ? { frameworkAnnotations: extractedClassSymbol.frameworkAnnotations }
+            : {}),
           ...methodProps,
           ...(declaredType !== undefined ? { declaredType } : {}),
         },

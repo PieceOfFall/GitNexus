@@ -16,6 +16,7 @@ import {
   closeLbug,
   isLbugReady,
 } from '../../core/lbug/pool-adapter.js';
+import { queryClassBeanMetadata } from './bean-metadata.js';
 import { isValidQueryParams } from '../../core/lbug/query-params.js';
 import { toDisplayLine } from './line-display.js';
 import { isWalCorruptionError, WAL_RECOVERY_SUGGESTION } from '../../core/lbug/lbug-config.js';
@@ -570,9 +571,7 @@ interface ApiImpactRoute {
  * form; any guard failure returns `{ error }`.
  */
 type ApiImpactResult =
-  | ApiImpactRoute
-  | { routes: ApiImpactRoute[]; total: number }
-  | { error: string };
+  ApiImpactRoute | { routes: ApiImpactRoute[]; total: number } | { error: string };
 
 /**
  * One repository entry as returned by {@link LocalBackend.listRepos} and in each
@@ -3221,6 +3220,7 @@ export class LocalBackend {
       epistemicSymType,
       (sym.name || sym[1]) as string,
     );
+    const beanMetadataPromise = queryClassBeanMetadata(repo.lbugPath, symId, epistemicSymType);
 
     let methodMetadata: Record<string, unknown> | undefined;
     if (isMethodLike) {
@@ -3259,7 +3259,7 @@ export class LocalBackend {
     // dynamic dispatch are not reflected in `incoming`, so the view is a lower
     // bound. Additive; never suppresses a field. Resolved from the probe started
     // above (concurrent with methodMetadata).
-    const epistemic = await epistemicPromise;
+    const [epistemic, beanMetadata] = await Promise.all([epistemicPromise, beanMetadataPromise]);
 
     return {
       status: 'found',
@@ -3272,6 +3272,7 @@ export class LocalBackend {
         endLine: toDisplayLine(sym.endLine ?? sym[5]),
         ...(include_content && (sym.content || sym[6]) ? { content: sym.content || sym[6] } : {}),
         ...(methodMetadata ? { methodMetadata } : {}),
+        ...(beanMetadata ? { bean: beanMetadata } : {}),
       },
       ...epistemic,
       incoming: categorize(incomingRows),
@@ -5524,6 +5525,7 @@ export class LocalBackend {
     }> = opts.skipEpistemic
       ? Promise.resolve({})
       : this.computeEpistemicBoundary(repo, symId, symType, (sym.name || sym[1]) as string);
+    const beanMetadataPromise = queryClassBeanMetadata(repo.lbugPath, symId, symType);
 
     const impacted: any[] = [];
     const visited = new Set<string>([symId]);
@@ -6006,7 +6008,7 @@ export class LocalBackend {
 
     // #1858 — await the epistemic boundary probe kicked off alongside the BFS
     // above. Additive: leaves impactedCount and every existing field untouched.
-    const epistemic = await epistemicPromise;
+    const [epistemic, beanMetadata] = await Promise.all([epistemicPromise, beanMetadataPromise]);
 
     const base = {
       target: {
@@ -6014,6 +6016,7 @@ export class LocalBackend {
         name: sym.name || sym[1],
         type: symType,
         filePath: sym.filePath || sym[2],
+        ...(beanMetadata ? { bean: beanMetadata } : {}),
       },
       direction,
       impactedCount: impacted.length,
@@ -6323,8 +6326,7 @@ export class LocalBackend {
             'individual indexed repository instead.',
           target: groupRejectTarget,
           direction: (params.direction === 'downstream' ? 'downstream' : 'upstream') as
-            | 'upstream'
-            | 'downstream',
+            'upstream' | 'downstream',
         });
         return pdgErr;
       }

@@ -15,6 +15,7 @@ import type { AstFrameworkPatternConfig } from '../language-provider.js';
 import { createLeadingDocDescriptionExtractor } from '../utils/ast-helpers.js';
 import { javaTypeConfig } from '../type-extractors/jvm.js';
 import { extractSpringRoutes, extractSpringTypes } from '../route-extractors/spring.js';
+import { extractSpringFrameworkAnnotations } from './java/spring-bean-metadata.js';
 import { javaExportChecker } from '../export-detection.js';
 import { createImportResolver } from '../import-resolvers/resolver-factory.js';
 import { javaImportConfig } from '../import-resolvers/configs/jvm.js';
@@ -116,7 +117,10 @@ export const javaProvider = defineLanguage({
   fieldExtractor: createFieldExtractor(javaConfig),
   methodExtractor: createMethodExtractor(javaMethodConfig),
   variableExtractor: createVariableExtractor(javaVariableConfig),
-  classExtractor: createClassExtractor(javaClassConfig),
+  classExtractor: createClassExtractor({
+    ...javaClassConfig,
+    extractFrameworkAnnotations: extractSpringFrameworkAnnotations,
+  }),
 
   // ── Javadoc → description (issue #2270) ──
   descriptionExtractor: createLeadingDocDescriptionExtractor(),

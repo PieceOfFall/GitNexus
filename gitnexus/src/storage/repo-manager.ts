@@ -331,8 +331,11 @@ export interface RepoMeta {
  * writeback preserves unchanged-file rows, so a top-up against a pre-v6 index
  * would MIX old 1-based rows with new 0-based ones — and the 1-based MCP display
  * would render the stale rows one line too high — so force a full re-analyze.
+ * v7: `Class` gained the `frameworkAnnotations` evidence column. Incremental
+ * writeback keeps unchanged Class rows, so a pre-v7 top-up would leave that
+ * inventory incomplete; force a full re-analyze instead.
  */
-export const INCREMENTAL_SCHEMA_VERSION = 6;
+export const INCREMENTAL_SCHEMA_VERSION = 7;
 
 export interface IndexedRepo {
   repoPath: string;
@@ -1610,14 +1613,7 @@ export interface CLIConfig {
   model?: string;
   baseUrl?: string;
   provider?:
-    | 'openai'
-    | 'openrouter'
-    | 'azure'
-    | 'custom'
-    | 'cursor'
-    | 'claude'
-    | 'codex'
-    | 'opencode';
+    'openai' | 'openrouter' | 'azure' | 'custom' | 'cursor' | 'claude' | 'codex' | 'opencode';
   cursorModel?: string;
   claudeModel?: string;
   codexModel?: string;
