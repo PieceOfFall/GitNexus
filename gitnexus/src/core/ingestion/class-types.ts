@@ -11,8 +11,6 @@ export interface ExtractedClassSymbol {
   type: ClassLikeNodeLabel;
   qualifiedName: string;
   templateArguments?: string[];
-  /** Canonical framework annotations confirmed by the language extractor; not a full annotation list. */
-  frameworkAnnotations?: string[];
 }
 
 export interface ClassCaptureContext {
@@ -78,7 +76,6 @@ export interface ClassExtractionConfig {
   extractType?: (node: SyntaxNode) => ClassLikeNodeLabel | undefined;
   extractScopeSegments?: (node: SyntaxNode) => string[] | null | undefined;
   extractTemplateArguments?: (node: SyntaxNode) => string[] | undefined;
-  extractFrameworkAnnotations?: (node: SyntaxNode) => string[] | undefined;
   shouldSkipClassCapture?(
     context: ClassCaptureContext & { nodeLabel: ClassLikeNodeLabel },
   ): boolean;

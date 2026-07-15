@@ -2401,10 +2401,6 @@ const processFileGroup = (
               }
             : {}),
           ...(description !== undefined ? { description } : {}),
-          ...(extractedClassSymbol?.frameworkAnnotations !== undefined &&
-          extractedClassSymbol.frameworkAnnotations.length > 0
-            ? { frameworkAnnotations: extractedClassSymbol.frameworkAnnotations }
-            : {}),
           ...methodProps,
           ...(declaredType !== undefined ? { declaredType } : {}),
         },

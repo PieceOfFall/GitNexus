@@ -59,6 +59,8 @@ function wildcardImportTarget(parsed: ParsedFile, simpleName: string): string | 
       .filter((entry) => entry.kind === 'wildcard')
       .map((entry) => entry.targetRaw.replace(/\.\*$/, '')),
   );
+  // Without classpath data, another on-demand import may expose the same
+  // simple name. Only a single wildcard package is unambiguous here.
   if (wildcardPackages.size !== 1) return undefined;
   const [packageName] = wildcardPackages;
   const target = `${packageName}.${simpleName}`;

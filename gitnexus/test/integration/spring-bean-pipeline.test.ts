@@ -49,6 +49,7 @@ describe('Spring Bean candidate inventory pipeline', () => {
     for (const name of [
       'PlainUtility',
       'WildcardCandidate',
+      'MultipleWildcardService',
       'MemberShadowedService',
       'ConflictingBean',
       'ComposedService',

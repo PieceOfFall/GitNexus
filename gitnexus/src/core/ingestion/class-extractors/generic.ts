@@ -142,15 +142,11 @@ export function createClassExtractor(config: ClassExtractionConfig): ClassExtrac
     if (!name || !type) return null;
 
     const templateArguments = config.extractTemplateArguments?.(node);
-    const frameworkAnnotations = config.extractFrameworkAnnotations?.(node);
     return {
       name,
       type,
       qualifiedName: buildQualifiedName(node, name) || name,
       ...(templateArguments !== undefined ? { templateArguments } : {}),
-      ...(frameworkAnnotations !== undefined && frameworkAnnotations.length > 0
-        ? { frameworkAnnotations }
-        : {}),
     };
   };
 

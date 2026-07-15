@@ -1,15 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import Parser from 'tree-sitter';
-import Java from 'tree-sitter-java';
-import { javaProvider } from '../../src/core/ingestion/languages/java.js';
 import {
   collectJavaCaptureSideChannel,
   type JavaCaptureSideChannel,
 } from '../../src/core/ingestion/languages/java/capture-side-channel.js';
 import { emitJavaScopeCaptures } from '../../src/core/ingestion/languages/java/captures.js';
 import { deriveSpringBeanMetadata } from '../../src/core/ingestion/languages/java/spring-bean-stereotypes.js';
-
-const CLASS_QUERY = new Parser.Query(Java, '(class_declaration) @class');
 
 function captureClassAnnotations(code: string): JavaCaptureSideChannel['classAnnotations'] {
   const filePath = 'src/Test.java';
@@ -36,21 +31,6 @@ describe('Java class annotation capture', () => {
       ['Deprecated', 'Service'],
       ['org.springframework.context.annotation.Configuration'],
     ]);
-  });
-
-  it('does not attach framework metadata during class extraction', () => {
-    const parser = new Parser();
-    parser.setLanguage(Java);
-    const tree = parser.parse(`
-      import org.springframework.stereotype.Service;
-      @Service class BillingService {}
-    `);
-    const classNode = CLASS_QUERY.matches(tree.rootNode)[0]?.captures[0]?.node;
-    expect(classNode).toBeDefined();
-    if (classNode === undefined) throw new Error('expected a Java class declaration');
-    expect(javaProvider.classExtractor?.extract(classNode)).not.toHaveProperty(
-      'frameworkAnnotations',
-    );
   });
 });
 
