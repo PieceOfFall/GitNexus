@@ -38,6 +38,7 @@ describe('Spring Bean candidate inventory pipeline', () => {
     ]);
 
     expect(classes.get('PlainUtility')).not.toHaveProperty('frameworkAnnotations');
+    expect(classes.get('WildcardCandidate')).not.toHaveProperty('frameworkAnnotations');
   });
 
   it('keeps RestController route discovery and HANDLES_ROUTE emission intact', () => {

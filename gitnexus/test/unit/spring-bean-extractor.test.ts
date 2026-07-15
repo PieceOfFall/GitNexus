@@ -35,11 +35,12 @@ function extractClasses(code: string): Array<string[] | undefined> {
 }
 
 describe('extractSpringFrameworkAnnotations', () => {
-  it('recognizes all supported stereotypes through explicit imports, wildcards, and FQNs', () => {
+  it('recognizes all supported stereotypes through explicit imports and FQNs', () => {
     const annotations = extractClasses(`
       import org.springframework.stereotype.Component;
       import org.springframework.stereotype.Service;
-      import org.springframework.stereotype.*;
+      import org.springframework.stereotype.Repository;
+      import org.springframework.stereotype.Controller;
       import org.springframework.web.bind.annotation.RestController;
 
       @Component("widget") class Widget {}
@@ -86,6 +87,23 @@ describe('extractSpringFrameworkAnnotations', () => {
     ]);
   });
 
+  it('ignores wildcard-only stereotypes but honors an explicit import alongside a wildcard', () => {
+    expect(
+      extractClasses(`
+        import org.springframework.stereotype.*;
+        @Service class WildcardOnlyService {}
+      `),
+    ).toEqual([undefined]);
+
+    expect(
+      extractClasses(`
+        import org.springframework.stereotype.*;
+        import org.springframework.stereotype.Service;
+        @Service class ExplicitlyImportedService {}
+      `),
+    ).toEqual([['org.springframework.stereotype.Service']]);
+  });
+
   it('fails closed for unresolved, shadowed, composed, and conflicting annotations', () => {
     expect(
       extractClasses(`
@@ -107,12 +125,22 @@ describe('extractSpringFrameworkAnnotations', () => {
     expect(extractClasses('@Service class CustomService {}')).toEqual([undefined]);
     expect(
       extractClasses(`
-        import org.springframework.stereotype.*;
+        import org.springframework.stereotype.Service;
 
         @interface Service {}
         @Service class LocallyShadowedService {}
       `),
     ).toEqual([undefined]);
+    expect(
+      extractClasses(`
+        import org.springframework.stereotype.Service;
+
+        class Outer {
+          @interface Service {}
+          @Service class MemberShadowedService {}
+        }
+      `),
+    ).toEqual([undefined, undefined]);
   });
 
   it('ignores non-class declarations and allows unrelated annotations', () => {

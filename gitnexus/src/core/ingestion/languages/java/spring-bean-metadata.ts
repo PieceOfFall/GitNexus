@@ -6,28 +6,32 @@ const IMPORT_DECLARATION_QUERY = new Parser.Query(Java, '(import_declaration) @i
 
 interface JavaImports {
   explicitBySimpleName: Map<string, Set<string>>;
-  wildcardPackages: Set<string>;
-  locallyDeclaredTypeNames: Set<string>;
+  topLevelDeclaredTypeNames: Set<string>;
 }
 
 const IMPORTS_BY_TREE = new WeakMap<Parser.Tree, JavaImports>();
-const TOP_LEVEL_TYPE_DECLARATIONS = new Set([
+const TYPE_DECLARATIONS = new Set([
   'annotation_type_declaration',
   'class_declaration',
   'enum_declaration',
   'interface_declaration',
   'record_declaration',
 ]);
+const TYPE_BODY_NODES = new Set([
+  'annotation_type_body',
+  'class_body',
+  'enum_body_declarations',
+  'interface_body',
+]);
 
 function collectJavaImports(tree: Parser.Tree): JavaImports {
   const explicitBySimpleName = new Map<string, Set<string>>();
-  const wildcardPackages = new Set<string>();
-  const locallyDeclaredTypeNames = new Set<string>();
+  const topLevelDeclaredTypeNames = new Set<string>();
 
   for (const child of tree.rootNode.namedChildren) {
-    if (!TOP_LEVEL_TYPE_DECLARATIONS.has(child.type)) continue;
+    if (!TYPE_DECLARATIONS.has(child.type)) continue;
     const name = child.childForFieldName('name')?.text.trim();
-    if (name) locallyDeclaredTypeNames.add(name);
+    if (name) topLevelDeclaredTypeNames.add(name);
   }
 
   for (const match of IMPORT_DECLARATION_QUERY.matches(tree.rootNode)) {
@@ -43,7 +47,8 @@ function collectJavaImports(tree: Parser.Tree): JavaImports {
 
     const importedName = parsed[1];
     if (parsed[2]) {
-      wildcardPackages.add(importedName);
+      // On-demand imports are ambiguous without same-package and classpath
+      // resolution, so this syntax-only extractor deliberately ignores them.
       continue;
     }
 
@@ -54,7 +59,7 @@ function collectJavaImports(tree: Parser.Tree): JavaImports {
     explicitBySimpleName.set(simpleName, imports);
   }
 
-  return { explicitBySimpleName, wildcardPackages, locallyDeclaredTypeNames };
+  return { explicitBySimpleName, topLevelDeclaredTypeNames };
 }
 
 function importsFor(tree: Parser.Tree): JavaImports {
@@ -62,10 +67,22 @@ function importsFor(tree: Parser.Tree): JavaImports {
   if (cached) return cached;
 
   // Class extraction visits each declaration separately. Cache the file-level
-  // file-level scan so nested and sibling classes do not rescan the same tree.
+  // scan so nested and sibling classes do not rescan the same tree.
   const imports = collectJavaImports(tree);
   IMPORTS_BY_TREE.set(tree, imports);
   return imports;
+}
+
+function hasEnclosingMemberType(annotation: Parser.SyntaxNode, simpleName: string): boolean {
+  for (let ancestor = annotation.parent; ancestor; ancestor = ancestor.parent) {
+    if (!TYPE_BODY_NODES.has(ancestor.type)) continue;
+
+    for (const member of ancestor.namedChildren) {
+      if (!TYPE_DECLARATIONS.has(member.type)) continue;
+      if (member.childForFieldName('name')?.text.trim() === simpleName) return true;
+    }
+  }
+  return false;
 }
 
 function declarationAnnotations(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
@@ -88,29 +105,23 @@ function resolveSpringStereotype(
     return SPRING_BEAN_STEREOTYPES.has(annotationName) ? annotationName : undefined;
   }
 
-  // A type declared in the same compilation unit shadows an on-demand import.
-  // Fail closed for explicit-import conflicts too, even though javac rejects them.
-  if (imports.locallyDeclaredTypeNames.has(annotationName)) return undefined;
+  // Top-level and enclosing member types can hide an imported annotation name.
+  // Fail closed instead of attempting Java name resolution without a compiler.
+  if (
+    imports.topLevelDeclaredTypeNames.has(annotationName) ||
+    hasEnclosingMemberType(annotation, annotationName)
+  ) {
+    return undefined;
+  }
 
   const explicitImports = imports.explicitBySimpleName.get(annotationName);
   if (explicitImports) {
-    // An explicit non-Spring same-name import shadows any Spring wildcard.
-    // Ambiguous duplicate imports also fail closed instead of guessing.
+    // Ambiguous duplicate imports fail closed instead of guessing.
     if (explicitImports.size !== 1) return undefined;
     const [explicitImport] = explicitImports;
     return SPRING_BEAN_STEREOTYPES.has(explicitImport) ? explicitImport : undefined;
   }
-
-  const wildcardMatches: string[] = [];
-  for (const [fqn, stereotype] of SPRING_BEAN_STEREOTYPES) {
-    if (
-      fqn.endsWith(`.${annotationName}`) &&
-      imports.wildcardPackages.has(stereotype.packageName)
-    ) {
-      wildcardMatches.push(fqn);
-    }
-  }
-  return wildcardMatches.length === 1 ? wildcardMatches[0] : undefined;
+  return undefined;
 }
 
 /** Return canonical Spring stereotype evidence for one Java class declaration. */
