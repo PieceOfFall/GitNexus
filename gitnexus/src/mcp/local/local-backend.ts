@@ -571,7 +571,9 @@ interface ApiImpactRoute {
  * form; any guard failure returns `{ error }`.
  */
 type ApiImpactResult =
-  ApiImpactRoute | { routes: ApiImpactRoute[]; total: number } | { error: string };
+  | ApiImpactRoute
+  | { routes: ApiImpactRoute[]; total: number }
+  | { error: string };
 
 /**
  * One repository entry as returned by {@link LocalBackend.listRepos} and in each
@@ -6326,7 +6328,8 @@ export class LocalBackend {
             'individual indexed repository instead.',
           target: groupRejectTarget,
           direction: (params.direction === 'downstream' ? 'downstream' : 'upstream') as
-            'upstream' | 'downstream',
+            | 'upstream'
+            | 'downstream',
         });
         return pdgErr;
       }

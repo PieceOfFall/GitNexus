@@ -1613,7 +1613,14 @@ export interface CLIConfig {
   model?: string;
   baseUrl?: string;
   provider?:
-    'openai' | 'openrouter' | 'azure' | 'custom' | 'cursor' | 'claude' | 'codex' | 'opencode';
+    | 'openai'
+    | 'openrouter'
+    | 'azure'
+    | 'custom'
+    | 'cursor'
+    | 'claude'
+    | 'codex'
+    | 'opencode';
   cursorModel?: string;
   claudeModel?: string;
   codexModel?: string;
