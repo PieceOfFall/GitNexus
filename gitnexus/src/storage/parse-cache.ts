@@ -55,7 +55,7 @@ import type { ParseWorkerResult } from '../core/ingestion/workers/parse-worker.j
 // the main thread (the #1983 OOM). Because the two stores share this version,
 // any future change to the `ParsedFile` serialization shape MUST bump
 // SCHEMA_BUMP so both invalidate in lockstep.
-const SCHEMA_BUMP = 13; // #2411: Class nodes can now carry frameworkAnnotations evidence. Warm v12 shards would replay nodes without it, so force re-extraction. (12 = #2391 follow-up module-constant correctness; 11 = #2391 route expressions/moduleConstants; 10 = PR #2200 Spring DI property metadata.)
+const SCHEMA_BUMP = 13; // Durable ParsedFile chunk directories now replace one complete generation instead of accumulating worker shards across cache-miss analyses. Invalidate once so existing unbounded stores are rebuilt under the bounded contract. (12 = #2391 follow-up: Python module constant extraction semantics changed.)
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from
