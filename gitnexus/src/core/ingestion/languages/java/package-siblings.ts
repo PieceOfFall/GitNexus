@@ -15,6 +15,12 @@ import { getJavaParser } from './query.js';
 import { parseSourceSafe, ParseTimeoutError } from '../../../tree-sitter/safe-parse.js';
 import { logger } from '../../../logger.js';
 
+const cappedPackageFiles = new Set<string>();
+
+export function isJavaPackageSiblingVisibilityCapped(filePath: string): boolean {
+  return cappedPackageFiles.has(filePath);
+}
+
 function extractPackageName(content: string, filePath: string, cachedTree?: unknown): string {
   let tree = cachedTree as ReturnType<ReturnType<typeof getJavaParser>['parse']> | undefined;
   if (tree === undefined) {
@@ -57,6 +63,7 @@ export function populateJavaPackageSiblings(
     readonly treeCache?: { get(filePath: string): unknown };
   },
 ): void {
+  cappedPackageFiles.clear();
   const buckets = new Map<string, PackageBucket>();
 
   for (const parsed of parsedFiles) {
@@ -82,6 +89,7 @@ export function populateJavaPackageSiblings(
   for (const bucket of buckets.values()) {
     if (bucket.moduleScopes.length < 2) continue;
     if (bucket.moduleScopes.length > MAX_PACKAGE_FILES) {
+      for (const parsed of bucket.parsed) cappedPackageFiles.add(parsed.filePath);
       logger.warn(
         `[java-package-siblings] skipping package with ${bucket.moduleScopes.length} files (cap=${MAX_PACKAGE_FILES}); same-package implicit visibility disabled for this package`,
       );

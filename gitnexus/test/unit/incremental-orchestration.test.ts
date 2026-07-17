@@ -21,7 +21,7 @@
  */
 
 import { execSync } from 'child_process';
-import { writeFile, readFile, rm } from 'fs/promises';
+import { writeFile, readFile, mkdir, rm } from 'fs/promises';
 import path from 'path';
 import { afterEach, beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
@@ -56,6 +56,42 @@ const gitCommitAll = (cwd: string, message: string): void => {
     { cwd, stdio: 'pipe' },
   );
 };
+
+const SPRING_SERVICE = 'org.springframework.stereotype.Service';
+
+async function setupSpringBeanIncrementalRepo() {
+  const repo = await createTempDir('gitnexus-incr-spring-bean-');
+  const src = path.join(repo.dbPath, 'src', 'com', 'other');
+  await mkdir(src, { recursive: true });
+  await writeFile(
+    path.join(src, 'WildcardService.java'),
+    'package com.other;\n' +
+      'import org.springframework.stereotype.*;\n\n' +
+      '@Service public class WildcardService {}\n',
+    'utf-8',
+  );
+  execSync('git init', { cwd: repo.dbPath, stdio: 'pipe' });
+  gitCommitAll(repo.dbPath, 'initial spring bean candidate');
+  return repo;
+}
+
+async function readWildcardServiceAnnotations(repoPath: string): Promise<string[]> {
+  const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+  const { lbugPath } = getStoragePaths(repoPath);
+  await adapter.initLbug(lbugPath);
+  try {
+    const rows = (await adapter.executeQuery(
+      "MATCH (c:Class) WHERE c.name = 'WildcardService' " +
+        'RETURN c.frameworkAnnotations AS frameworkAnnotations LIMIT 1',
+    )) as Array<{ frameworkAnnotations?: unknown }>;
+    const value = rows[0]?.frameworkAnnotations;
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : [];
+  } finally {
+    await adapter.closeLbug();
+  }
+}
 
 /**
  * Direct count over INJECTS CodeRelation rows — mirrors pdg-mode-flip's
@@ -191,6 +227,40 @@ describe('runFullAnalysis — incremental orchestration', () => {
     }
   }, 300_000);
 
+  it('skips the framework annotation drift query when no Java source changed', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+
+      const target = path.join(repo.dbPath, 'src', 'logger.ts');
+      const before = await readFile(target, 'utf-8');
+      await writeFile(target, before + '\n// non-java incremental touch\n', 'utf-8');
+
+      const querySpy = vi.spyOn(adapter, 'executeQuery');
+      try {
+        const incremental = await runFullAnalysis(
+          repo.dbPath,
+          { skipAgentsMd: true },
+          { onProgress: () => {} },
+        );
+        expect(incremental.alreadyUpToDate).toBeUndefined();
+        expect(
+          querySpy.mock.calls.some(
+            ([query]) =>
+              typeof query === 'string' &&
+              query.includes('RETURN c.id AS id, c.frameworkAnnotations AS frameworkAnnotations'),
+          ),
+        ).toBe(false);
+      } finally {
+        querySpy.mockRestore();
+      }
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
   it('incremental output is byte-equivalent to a full rebuild (incremental ≡ --force on the same repo state)', async () => {
     // The central correctness contract of this PR: an incremental run
     // and a full rebuild from the same repo state must produce identical
@@ -245,6 +315,30 @@ describe('runFullAnalysis — incremental orchestration', () => {
       expect(secondMeta!.stats?.edges).toBe(forceMeta!.stats?.edges);
       expect(secondMeta!.stats?.communities).toBe(forceMeta!.stats?.communities);
       expect(secondMeta!.stats?.processes).toBe(forceMeta!.stats?.processes);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 600_000);
+
+  it('rewrites unchanged Spring bean metadata when same-package shadowing changes', async () => {
+    const repo = await setupSpringBeanIncrementalRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([SPRING_SERVICE]);
+
+      const shadow = path.join(repo.dbPath, 'src', 'com', 'other', 'Service.java');
+      await writeFile(shadow, 'package com.other;\npublic @interface Service {}\n', 'utf-8');
+      gitCommitAll(repo.dbPath, 'add same-package annotation shadow');
+
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([]);
+
+      await rm(shadow);
+      gitCommitAll(repo.dbPath, 'remove same-package annotation shadow');
+
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([SPRING_SERVICE]);
     } finally {
       await repo.cleanup();
     }

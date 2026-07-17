@@ -6,6 +6,8 @@ import { withTestLbugDB } from '../helpers/test-indexed-db.js';
 import { streamAllCSVsToDisk } from '../../src/core/lbug/csv-generator.js';
 
 const CLASS_ID = 'Class:src/BillingService.java:BillingService';
+const FRAMEWORK_MARKER = 'com.acme.FrameworkMarker';
+const itLbugReopen = process.platform === 'win32' ? it.skip : it;
 
 withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
   it('preserves Class framework annotations through all write paths', async () => {
@@ -17,10 +19,7 @@ withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
         name: 'BillingService',
         filePath: 'src/BillingService.java',
         extra: {
-          frameworkAnnotations: [
-            'org.springframework.stereotype.Service',
-            'com.acme.FrameworkMarker',
-          ],
+          frameworkAnnotations: ['org.springframework.stereotype.Service', FRAMEWORK_MARKER],
         },
       },
     ]);
@@ -36,7 +35,7 @@ withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
       'id,name,filePath,startLine,endLine,isExported,content,description,frameworkAnnotations',
     );
     expect(classCsv).toContain('org.springframework.stereotype.Service');
-    expect(classCsv).toContain('com.acme.FrameworkMarker');
+    expect(classCsv).toContain(FRAMEWORK_MARKER);
 
     await adapter.executeQuery(adapter.getCopyQuery('Class', classCsvPath.replace(/\\/g, '/')));
     expect(
@@ -45,10 +44,7 @@ withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
       ),
     ).toEqual([
       {
-        frameworkAnnotations: [
-          'org.springframework.stereotype.Service',
-          'com.acme.FrameworkMarker',
-        ],
+        frameworkAnnotations: ['org.springframework.stereotype.Service', FRAMEWORK_MARKER],
       },
     ]);
 
@@ -69,9 +65,10 @@ withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
         frameworkAnnotations: ['org.springframework.stereotype.Component'],
       },
     ]);
+  });
 
-    if (process.platform === 'win32') return;
-
+  itLbugReopen('preserves Class framework annotations through batch upserts', async () => {
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
     // The batch helper owns its connection, so release the singleton lock for
     // the call and restore it before the shared fixture tears down.
     await adapter.closeLbug();
@@ -85,10 +82,7 @@ withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
               id: CLASS_ID,
               name: 'BillingService',
               filePath: 'src/BillingService.java',
-              frameworkAnnotations: [
-                'org.springframework.stereotype.Repository',
-                'com.acme.FrameworkMarker',
-              ],
+              frameworkAnnotations: ['org.springframework.stereotype.Repository', FRAMEWORK_MARKER],
             },
           },
         ],
@@ -105,11 +99,27 @@ withTestLbugDB('spring-bean-metadata-roundtrip', (handle) => {
       ),
     ).toEqual([
       {
-        frameworkAnnotations: [
-          'org.springframework.stereotype.Repository',
-          'com.acme.FrameworkMarker',
-        ],
+        frameworkAnnotations: ['org.springframework.stereotype.Repository', FRAMEWORK_MARKER],
       },
     ]);
+  });
+
+  it('rejects framework annotation items that COPY cannot encode losslessly', async () => {
+    const graph = buildTestGraph([
+      {
+        id: 'Class:src/Unsafe.java:Unsafe',
+        label: 'Class',
+        name: 'Unsafe',
+        filePath: 'src/Unsafe.java',
+        extra: { frameworkAnnotations: ['com.acme.Has,Comma'] },
+      },
+    ]);
+    const csvDir = path.join(handle.tmpHandle.dbPath, 'csv-unsafe-framework-annotation');
+    const repoDir = path.join(handle.tmpHandle.dbPath, 'repo-unsafe-framework-annotation');
+    await fs.mkdir(repoDir, { recursive: true });
+
+    await expect(streamAllCSVsToDisk(graph, repoDir, csvDir)).rejects.toThrow(
+      'Cannot safely encode CSV string-list item',
+    );
   });
 });

@@ -55,6 +55,8 @@ describe('Spring Bean candidate inventory pipeline', () => {
       'ComposedService',
       'ExplicitCustomService',
       'TopLevelShadowedComponent',
+      'InheritedMemberShadowedService',
+      'StaticImportShadowedService',
     ]) {
       expect(classes.get(name)).not.toHaveProperty('frameworkAnnotations');
     }

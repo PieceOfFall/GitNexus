@@ -5527,7 +5527,10 @@ export class LocalBackend {
     }> = opts.skipEpistemic
       ? Promise.resolve({})
       : this.computeEpistemicBoundary(repo, symId, symType, (sym.name || sym[1]) as string);
-    const beanMetadataPromise = queryClassBeanMetadata(repo.lbugPath, symId, symType);
+    const beanMetadataPromise =
+      opts.skipEpistemic || summaryOnly
+        ? Promise.resolve(undefined)
+        : queryClassBeanMetadata(repo.lbugPath, symId, symType);
 
     const impacted: any[] = [];
     const visited = new Set<string>([symId]);

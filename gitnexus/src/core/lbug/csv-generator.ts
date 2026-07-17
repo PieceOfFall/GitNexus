@@ -121,8 +121,10 @@ const formatCSVStringArray = (value: unknown): string => {
   const items = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
-  // COPY treats quotes inside list fields as part of each STRING value. These
-  // are canonical annotation names, so bare comma-separated items round-trip.
+  const unsafe = items.find((item) => /[,\[\]'"\n\r]/.test(item));
+  if (unsafe !== undefined) {
+    throw new Error(`Cannot safely encode CSV string-list item: ${JSON.stringify(unsafe)}`);
+  }
   return `[${items.join(',')}]`;
 };
 

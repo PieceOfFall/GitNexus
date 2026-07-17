@@ -1,11 +1,35 @@
-import type { ParsedFile, ScopeId } from 'gitnexus-shared';
+import type { ParsedFile, ScopeId, SymbolDefinition } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../../../graph/types.js';
 import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
 import type { GraphNodeLookup } from '../../scope-resolution/graph-bridge/node-lookup.js';
 import { resolveDefGraphId } from '../../scope-resolution/graph-bridge/ids.js';
 import { isClassLike, lookupBindingsAt } from '../../scope-resolution/scope/walkers.js';
 import { getJavaClassAnnotationFacts } from './capture-side-channel.js';
+import { isJavaPackageSiblingVisibilityCapped } from './package-siblings.js';
 import { SPRING_BEAN_STEREOTYPES } from './spring-bean-stereotypes.js';
+
+type OwnedTypeNamesByOwner = ReadonlyMap<string, ReadonlySet<string>>;
+
+function simpleNameOf(def: SymbolDefinition): string | undefined {
+  const qualifiedName = def.qualifiedName;
+  if (qualifiedName === undefined) return undefined;
+  const separator = qualifiedName.lastIndexOf('.');
+  return separator === -1 ? qualifiedName : qualifiedName.slice(separator + 1);
+}
+
+function buildOwnedTypeNamesByOwner(indexes: ScopeResolutionIndexes): OwnedTypeNamesByOwner {
+  const namesByOwner = new Map<string, Set<string>>();
+  for (const def of indexes.defs.byId.values()) {
+    if (def.ownerId === undefined) continue;
+    if (!isClassLike(def.type) && def.type !== 'Annotation') continue;
+    const simpleName = simpleNameOf(def);
+    if (simpleName === undefined) continue;
+    const names = namesByOwner.get(def.ownerId) ?? new Set<string>();
+    names.add(simpleName);
+    namesByOwner.set(def.ownerId, names);
+  }
+  return namesByOwner;
+}
 
 function hasLexicalTypeDeclaration(
   startScope: ScopeId | null,
@@ -29,10 +53,35 @@ function explicitImportTargets(parsed: ParsedFile, simpleName: string): Readonly
   const targets = new Set<string>();
   for (const entry of parsed.parsedImports) {
     if (entry.kind !== 'named' && entry.kind !== 'alias') continue;
-    if (entry.localName !== simpleName || entry.targetIncludesImportedName !== true) continue;
+    if (entry.localName !== simpleName) continue;
     targets.add(entry.targetRaw);
   }
   return targets;
+}
+
+function hasInheritedTypeDeclaration(
+  startScope: ScopeId | null,
+  simpleName: string,
+  indexes: ScopeResolutionIndexes,
+  ownedTypeNamesByOwner: OwnedTypeNamesByOwner,
+): boolean {
+  let scopeId = startScope;
+  const visited = new Set<ScopeId>();
+  while (scopeId !== null && !visited.has(scopeId)) {
+    visited.add(scopeId);
+    const scope = indexes.scopeTree.getScope(scopeId);
+    if (scope === undefined) return false;
+    if (scope.kind === 'Class') {
+      const classDef = scope.ownedDefs.find((def) => isClassLike(def.type));
+      if (classDef !== undefined) {
+        for (const ancestorId of indexes.methodDispatch.mroFor(classDef.nodeId)) {
+          if (ownedTypeNamesByOwner.get(ancestorId)?.has(simpleName) === true) return true;
+        }
+      }
+    }
+    scopeId = scope.parent;
+  }
+  return false;
 }
 
 function hasVisibleTypeBinding(
@@ -72,12 +121,16 @@ function resolveSpringAnnotation(
   parsed: ParsedFile,
   enclosingScope: ScopeId | null,
   indexes: ScopeResolutionIndexes,
+  ownedTypeNamesByOwner: OwnedTypeNamesByOwner,
 ): string | undefined {
   if (rawName.includes('.')) {
     return SPRING_BEAN_STEREOTYPES.has(rawName) ? rawName : undefined;
   }
 
   if (hasLexicalTypeDeclaration(enclosingScope, rawName, indexes)) return undefined;
+  if (hasInheritedTypeDeclaration(enclosingScope, rawName, indexes, ownedTypeNamesByOwner)) {
+    return undefined;
+  }
 
   // External Spring classes are normally outside the indexed repository, so
   // finalized bindings may remain unresolved. ParsedImport retains the exact
@@ -91,6 +144,7 @@ function resolveSpringAnnotation(
 
   const wildcardTarget = wildcardImportTarget(parsed, rawName);
   if (wildcardTarget === undefined) return undefined;
+  if (isJavaPackageSiblingVisibilityCapped(parsed.filePath)) return undefined;
 
   // Same-package types and resolved wildcard imports are available only after
   // finalize/populateNamespaceSiblings. Any such binding wins over guessing
@@ -105,6 +159,7 @@ export function attachSpringBeanCandidateMetadata(
   nodeLookup: GraphNodeLookup,
   indexes: ScopeResolutionIndexes,
 ): void {
+  const ownedTypeNamesByOwner = buildOwnedTypeNamesByOwner(indexes);
   for (const parsed of parsedFiles) {
     for (const fact of getJavaClassAnnotationFacts(parsed.filePath)) {
       const classScope = indexes.scopeTree.getScope(fact.classScopeId);
@@ -119,7 +174,13 @@ export function attachSpringBeanCandidateMetadata(
 
       const recognized = new Set<string>();
       for (const rawName of fact.annotationNames) {
-        const annotation = resolveSpringAnnotation(rawName, parsed, classScope.parent, indexes);
+        const annotation = resolveSpringAnnotation(
+          rawName,
+          parsed,
+          classScope.parent,
+          indexes,
+          ownedTypeNamesByOwner,
+        );
         if (annotation !== undefined) recognized.add(annotation);
       }
 

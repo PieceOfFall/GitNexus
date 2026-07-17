@@ -12,6 +12,11 @@ export interface JavaCaptureSideChannel {
 
 const classAnnotationsByFile = new Map<string, readonly JavaClassAnnotationFact[]>();
 
+/** Clear facts retained by a prior workspace pass in a long-lived process. */
+export function clearJavaClassAnnotationFacts(): void {
+  classAnnotationsByFile.clear();
+}
+
 /** Store the annotation syntax collected by Java's existing scope-query traversal. */
 export function setJavaClassAnnotationFacts(
   filePath: string,
