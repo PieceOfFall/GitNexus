@@ -73,7 +73,7 @@ describe('CALL_SUMMARY relation-type exclusion (U-C1)', () => {
 });
 
 describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
-  it('INCREMENTAL_SCHEMA_VERSION is bumped to 7 (Class framework annotation evidence)', () => {
+  it('INCREMENTAL_SCHEMA_VERSION is bumped to 7 (framework annotation evidence and callable-value-flow edges)', () => {
     expect(INCREMENTAL_SCHEMA_VERSION).toBe(7);
   });
 
@@ -95,7 +95,10 @@ describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
     // COBOL/JCL/markdown/scope rows are still 1-based, so an incremental top-up
     // would mix bases → must NOT reuse.
     expect(passesReuseGate(5)).toBe(false);
-    // A pre-v7 (v6) index has no Class frameworkAnnotations column.
+    // A pre-v7 (v6) index has no Class frameworkAnnotations column and predates
+    // the callable-value-flow edges (#2437/#2522). Incremental reuse would leave
+    // the annotation inventory incomplete and omit new edges between unchanged
+    // files → must NOT reuse.
     expect(passesReuseGate(6)).toBe(false);
     // A current-version stamp passes the gate (incremental top-up eligible).
     expect(passesReuseGate(7)).toBe(true);

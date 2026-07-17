@@ -355,9 +355,11 @@ export interface RepoMeta {
  * writeback preserves unchanged-file rows, so a top-up against a pre-v6 index
  * would MIX old 1-based rows with new 0-based ones — and the 1-based MCP display
  * would render the stale rows one line too high — so force a full re-analyze.
- * v7: `Class` gained the `frameworkAnnotations` evidence column. Incremental
- * writeback keeps unchanged Class rows, so a pre-v7 top-up would leave that
- * inventory incomplete; force a full re-analyze instead.
+ * v7: `Class` gained the `frameworkAnnotations` evidence column, and
+ * callable-value-flow CALLS/USES edges were added (#2437/#2522). Incremental
+ * writeback only covers changed files and keeps unchanged Class rows, so topping
+ * up a pre-v7 index would leave both the annotation inventory and new edges
+ * incomplete; force a full re-analyze instead (same contract as v2–v6).
  */
 export const INCREMENTAL_SCHEMA_VERSION = 7;
 
