@@ -120,6 +120,7 @@ export const kotlinScopeResolver: ScopeResolver = {
   propagatesReturnTypesAcrossImports: true,
   collapseMemberCallsByCallerTarget: false,
   hoistTypeBindingsToModule: true,
+  postExtractSourceTextPolicy: 'uncached-files',
   populateNamespaceSiblings: populateKotlinPackageSiblings,
   emitPostResolutionEdges: attachKotlinSpringBeanCandidateMetadata,
 };
