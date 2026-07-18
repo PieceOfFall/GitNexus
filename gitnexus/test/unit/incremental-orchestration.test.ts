@@ -42,6 +42,8 @@ import {
   seedEmbeddingsForFiles,
   stampEmbeddingCount,
 } from '../helpers/embedding-seed.js';
+import { CLASS_FRAMEWORK_ANNOTATIONS_FEATURE } from '../../src/core/analysis-features.js';
+import { SPRING_BEAN_INVENTORY_FEATURE } from '../../src/core/ingestion/frameworks/spring/analysis-features.js';
 
 const setupMiniRepo = () => setupSharedMiniRepo('gitnexus-incr-orch-');
 
@@ -58,6 +60,15 @@ const gitCommitAll = (cwd: string, message: string): void => {
 };
 
 const SPRING_SERVICE = 'org.springframework.stereotype.Service';
+
+function withoutAnalysisFeature(meta: RepoMeta, featureId: string): RepoMeta {
+  return {
+    ...meta,
+    analysisFeatures: Object.fromEntries(
+      Object.entries(meta.analysisFeatures ?? {}).filter(([id]) => id !== featureId),
+    ),
+  };
+}
 
 async function setupSpringBeanIncrementalRepo() {
   const repo = await createTempDir('gitnexus-incr-spring-bean-');
@@ -164,6 +175,9 @@ describe('runFullAnalysis — incremental orchestration', () => {
       expect(meta!.schemaVersion).toBe(INCREMENTAL_SCHEMA_VERSION);
       expect(meta!.fileHashes).toBeDefined();
       expect(Object.keys(meta!.fileHashes ?? {}).length).toBeGreaterThan(0);
+      expect(meta!.analysisFeatures).toEqual({
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+      });
       // Dirty flag MUST be cleared after a successful run.
       expect(meta!.incrementalInProgress).toBeUndefined();
     } finally {
@@ -190,6 +204,103 @@ describe('runFullAnalysis — incremental orchestration', () => {
       // lastCommit==HEAD && working tree clean (mod GitNexus output) →
       // early-return fast path.
       expect(second.alreadyUpToDate).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  it('a same-commit v8 index missing the global Class capability rebuilds before the fast path', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const meta = await loadMeta(storagePath);
+      expect(meta!.schemaVersion).toBe(INCREMENTAL_SCHEMA_VERSION);
+
+      await saveMeta(
+        storagePath,
+        withoutAnalysisFeature(meta!, CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id),
+      );
+      const logs: string[] = [];
+      const reanalyzed = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(reanalyzed.alreadyUpToDate).toBeUndefined();
+      expect(logs.join('\n')).toContain(`missing:${CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id}`);
+      expect((await loadMeta(storagePath))!.analysisFeatures).toEqual({
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  it('a JVM index missing Bean inventory evidence rebuilds and restores the scoped stamp', async () => {
+    const repo = await setupKotlinSpringBeanIncrementalRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const meta = await loadMeta(storagePath);
+      expect(meta!.analysisFeatures).toEqual({
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+        [SPRING_BEAN_INVENTORY_FEATURE.id]: SPRING_BEAN_INVENTORY_FEATURE.version,
+      });
+
+      await saveMeta(storagePath, withoutAnalysisFeature(meta!, SPRING_BEAN_INVENTORY_FEATURE.id));
+      const logs: string[] = [];
+      const reanalyzed = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(reanalyzed.alreadyUpToDate).toBeUndefined();
+      expect(logs.join('\n')).toContain(`missing:${SPRING_BEAN_INVENTORY_FEATURE.id}`);
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([SPRING_SERVICE]);
+      expect((await loadMeta(storagePath))!.analysisFeatures).toEqual({
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+        [SPRING_BEAN_INVENTORY_FEATURE.id]: SPRING_BEAN_INVENTORY_FEATURE.version,
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  it('adding the first JVM file re-evaluates capabilities after the pipeline and avoids a top-up', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      expect((await loadMeta(storagePath))!.analysisFeatures).toEqual({
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+      });
+
+      await writeFile(
+        path.join(repo.dbPath, 'src', 'FirstBean.kt'),
+        'import org.springframework.stereotype.Service\n\n@Service class FirstBean\n',
+        'utf-8',
+      );
+      gitCommitAll(repo.dbPath, 'add first JVM source file');
+
+      const logs: string[] = [];
+      await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(logs.join('\n')).toContain(`missing:${SPRING_BEAN_INVENTORY_FEATURE.id}`);
+      expect(logs.join('\n')).not.toContain('Incremental:');
+      expect((await loadMeta(storagePath))!.analysisFeatures).toEqual({
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+        [SPRING_BEAN_INVENTORY_FEATURE.id]: SPRING_BEAN_INVENTORY_FEATURE.version,
+      });
     } finally {
       await repo.cleanup();
     }

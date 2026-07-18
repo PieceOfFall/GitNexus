@@ -80,6 +80,12 @@ describe('Spring Bean candidate inventory pipeline', () => {
     expect(symbols.get('KotlinAbstractService')?.frameworkAnnotations).toEqual([
       'org.springframework.stereotype.Service',
     ]);
+    expect(symbols.get('KotlinApiController')?.frameworkAnnotations).toEqual([
+      'org.springframework.web.bind.annotation.RestController',
+    ]);
+    expect(symbols.get('KotlinServiceId')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
     expect(symbols.get('KotlinNestedService')?.frameworkAnnotations).toEqual([
       'org.springframework.stereotype.Service',
     ]);

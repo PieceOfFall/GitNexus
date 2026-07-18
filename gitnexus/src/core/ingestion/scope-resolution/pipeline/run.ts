@@ -266,7 +266,10 @@ function emitDetectedInterfaceImplementations(
 }
 
 export type ScopeResolutionSubPhase =
-  'extracting' | 'analyzing types' | 'resolving references' | 'linking symbols';
+  | 'extracting'
+  | 'analyzing types'
+  | 'resolving references'
+  | 'linking symbols';
 
 interface RunScopeResolutionInput {
   readonly graph: KnowledgeGraph;

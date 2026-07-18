@@ -45,6 +45,7 @@ import {
 } from '../../src/storage/repo-manager.js';
 import { runFullAnalysis } from '../../src/core/run-analyze.js';
 import { createTempDir } from '../helpers/test-db.js';
+import { CLASS_FRAMEWORK_ANNOTATIONS_FEATURE } from '../../src/core/analysis-features.js';
 
 describe('fast-path restamp failure modes (#2364 F3)', () => {
   let tmpHome: Awaited<ReturnType<typeof createTempDir>>;
@@ -95,6 +96,9 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       indexedAt: new Date().toISOString(),
       branch,
       schemaVersion: INCREMENTAL_SCHEMA_VERSION,
+      analysisFeatures: {
+        [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
+      },
     });
     const flat = getStoragePaths(tmpRepo.dbPath);
     await rmCtx.realSaveMeta!(flat.storagePath, metaFor('main'));

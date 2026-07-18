@@ -98,7 +98,15 @@ export interface CobolRegexResults {
     cursors: string[];
     hostVariables: string[];
     operation:
-      'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'DECLARE' | 'OPEN' | 'CLOSE' | 'FETCH' | 'OTHER';
+      | 'SELECT'
+      | 'INSERT'
+      | 'UPDATE'
+      | 'DELETE'
+      | 'DECLARE'
+      | 'OPEN'
+      | 'CLOSE'
+      | 'FETCH'
+      | 'OTHER';
     includeMember?: string;
   }>;
   execCicsBlocks: Array<{
@@ -784,7 +792,15 @@ function parseSelectStatement(stmt: string, startLine: number): FileDeclaration 
 // ---------------------------------------------------------------------------
 
 type SqlOperation =
-  'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'DECLARE' | 'OPEN' | 'CLOSE' | 'FETCH' | 'OTHER';
+  | 'SELECT'
+  | 'INSERT'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'DECLARE'
+  | 'OPEN'
+  | 'CLOSE'
+  | 'FETCH'
+  | 'OTHER';
 
 function parseExecSqlBlock(
   block: string,
@@ -2016,7 +2032,11 @@ export function extractCobolSymbolsWithRegex(
     const arithMatch = lineForArith.match(/\b(COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE)\s+(.+)/i);
     if (arithMatch) {
       const verb = arithMatch[1].toUpperCase() as
-        'COMPUTE' | 'ADD' | 'SUBTRACT' | 'MULTIPLY' | 'DIVIDE';
+        | 'COMPUTE'
+        | 'ADD'
+        | 'SUBTRACT'
+        | 'MULTIPLY'
+        | 'DIVIDE';
       const rest = arithMatch[2].replace(/\..*$/, '').trim();
       let target = '';
       const sources: string[] = [];

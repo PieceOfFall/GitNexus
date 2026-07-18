@@ -3,6 +3,7 @@ package com.kotlin.inventory
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service as SpringService
 import org.springframework.stereotype.*
+import org.springframework.web.bind.annotation.RestController
 
 @Component
 class KotlinWidgetComponent
@@ -15,6 +16,13 @@ sealed class KotlinConfiguration
 
 @SpringService
 abstract class KotlinAbstractService
+
+@RestController
+class KotlinApiController
+
+@JvmInline
+@SpringService
+value class KotlinServiceId(val value: String)
 
 class KotlinOuter {
     @SpringService

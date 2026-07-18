@@ -106,7 +106,10 @@ interface OperandSyntax {
   readonly callableReference: boolean;
   readonly anonymousCallable: boolean;
   readonly expressionKind:
-    'binding' | 'callable-designator' | 'bound-member' | 'anonymous-callable';
+    | 'binding'
+    | 'callable-designator'
+    | 'bound-member'
+    | 'anonymous-callable';
 }
 
 interface AssignmentParts {

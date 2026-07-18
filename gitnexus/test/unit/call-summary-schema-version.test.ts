@@ -95,10 +95,9 @@ describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
     // COBOL/JCL/markdown/scope rows are still 1-based, so an incremental top-up
     // would mix bases → must NOT reuse.
     expect(passesReuseGate(5)).toBe(false);
-    // A pre-v7 (v6) index has no Class frameworkAnnotations column and predates
-    // the callable-value-flow edges (#2437/#2522). Incremental reuse would leave
-    // the annotation inventory incomplete and omit new edges between unchanged
-    // files → must NOT reuse.
+    // A pre-v7 (v6) index predates the callable-value-flow edges (#2437/#2522)
+    // — new edges between unchanged files would never enter the incremental
+    // write set → must NOT reuse.
     expect(passesReuseGate(6)).toBe(false);
     // A pre-v8 (v7) index predates the Java anonymous-class instance model
     // (#2550) — `Worker.run`-keyed Method nodes would be stranded alongside

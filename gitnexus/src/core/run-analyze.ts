@@ -121,6 +121,17 @@ import { sanitizeDetectedBranch } from '../cli/analyze-config.js';
 import { EMBEDDING_TABLE_NAME } from './lbug/schema.js';
 import { STALE_HASH_SENTINEL } from './lbug/schema.js';
 import { isSpringBeanCandidateSourceFile } from './ingestion/frameworks/spring/bean-catalog.js';
+import { SPRING_BEAN_INVENTORY_FEATURE } from './ingestion/frameworks/spring/analysis-features.js';
+import {
+  CLASS_FRAMEWORK_ANNOTATIONS_FEATURE,
+  findAnalysisFeatureMismatches,
+  resolveAnalysisFeatureVersions,
+} from './analysis-features.js';
+
+const ANALYSIS_FEATURES = [
+  CLASS_FRAMEWORK_ANNOTATIONS_FEATURE,
+  SPRING_BEAN_INVENTORY_FEATURE,
+] as const;
 
 interface PersistedFrameworkAnnotationRow {
   readonly id?: unknown;
@@ -965,6 +976,34 @@ export async function runFullAnalysis(
     options = { ...options, force: true };
   }
 
+  // ── independently-versioned analysis capabilities ────────────────
+  // `schemaVersion` is reserved for graph-wide incremental invariants. Some
+  // persisted semantics apply only to repositories containing relevant source
+  // files, so they carry exact feature versions instead. This guard must also
+  // run before alreadyUpToDate: current main and this PR both use schema v8,
+  // while pre-PR v8 indexes lack the Class frameworkAnnotations column and
+  // Java/Kotlin Bean evidence.
+  const persistedFilePaths = Object.keys(existingMeta?.fileHashes ?? {});
+  const expectedPersistedAnalysisFeatures = resolveAnalysisFeatureVersions(
+    ANALYSIS_FEATURES,
+    persistedFilePaths,
+  );
+  const persistedAnalysisFeatureMismatches = existingMeta
+    ? findAnalysisFeatureMismatches(
+        existingMeta.analysisFeatures,
+        expectedPersistedAnalysisFeatures,
+      )
+    : [];
+  let analysisFeatureMismatchLogged = false;
+  if (existingMeta && persistedAnalysisFeatureMismatches.length > 0) {
+    log(
+      `analysis capabilities changed (${persistedAnalysisFeatureMismatches.join(', ')}); ` +
+        `forcing a full rebuild so persisted feature evidence is complete.`,
+    );
+    options = { ...options, force: true };
+    analysisFeatureMismatchLogged = true;
+  }
+
   if (
     existingMeta &&
     cjkSegmentationModeMismatch(existingMeta.cjkSegmentation, getSearchFTSCjkSegmentation())
@@ -1238,6 +1277,24 @@ export async function runFullAnalysis(
     }
   });
   const newFileHashes = await computeFileHashes(repoPath, allFilePaths);
+  const currentAnalysisFeatures = resolveAnalysisFeatureVersions(ANALYSIS_FEATURES, allFilePaths);
+  const currentAnalysisFeatureMismatches = existingMeta
+    ? findAnalysisFeatureMismatches(existingMeta.analysisFeatures, currentAnalysisFeatures)
+    : [];
+  if (
+    existingMeta &&
+    currentAnalysisFeatureMismatches.length > 0 &&
+    !analysisFeatureMismatchLogged
+  ) {
+    // Covers a repository gaining or losing its first applicable source file:
+    // the persisted file list cannot predict that transition before the
+    // pipeline, but an incremental top-up would leave unchanged rows incomplete.
+    log(
+      `analysis capabilities changed (${currentAnalysisFeatureMismatches.join(', ')}); ` +
+        `forcing a full rebuild so persisted feature evidence is complete.`,
+    );
+    options = { ...options, force: true };
+  }
 
   // Decide incremental vs full at THIS point (post-pipeline, pre-DB).
   // All eligibility conditions are checked here against the actual
@@ -1249,6 +1306,7 @@ export async function runFullAnalysis(
     !options.force &&
     !!existingMeta &&
     existingMeta.schemaVersion === INCREMENTAL_SCHEMA_VERSION &&
+    currentAnalysisFeatureMismatches.length === 0 &&
     !!existingMeta.fileHashes &&
     Object.keys(existingMeta.fileHashes).length > 0 &&
     repoHasGit &&
@@ -1971,6 +2029,7 @@ export async function runFullAnalysis(
             embeddings,
           },
           schemaVersion: hasGitDir(repoPath) ? INCREMENTAL_SCHEMA_VERSION : undefined,
+          analysisFeatures: currentAnalysisFeatures,
           cjkSegmentation: getSearchFTSCjkSegmentation(),
           fileHashes: hasGitDir(repoPath) ? fileHashes : undefined,
           cacheKeys: [...parseCache.usedKeys],
@@ -2133,6 +2192,7 @@ export async function runFullAnalysis(
       // incrementalInProgress to undefined explicitly clears any prior
       // dirty flag (full and incremental success paths converge here).
       schemaVersion: hasGitDir(repoPath) ? INCREMENTAL_SCHEMA_VERSION : undefined,
+      analysisFeatures: currentAnalysisFeatures,
       // Always stamped with the live resolved mode (#2331/#2339) — unlike
       // `pdg` below, 'none' is a meaningful value to compare, not an
       // absence, so this is never conditionally omitted.

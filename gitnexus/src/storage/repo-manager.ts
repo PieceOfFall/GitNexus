@@ -145,6 +145,12 @@ export interface RepoMeta {
    */
   schemaVersion?: number;
   /**
+   * Exact versions of independently-gated analysis capabilities produced by
+   * the successful run. Unlike schemaVersion, these may apply only to repos
+   * containing relevant source files.
+   */
+  analysisFeatures?: Record<string, number>;
+  /**
    * The resolved GITNEXUS_FTS_CJK_SEGMENTATION mode ('none' | 'bigram') the
    * existing index's content/description columns were last written under
    * (#2331/#2339). On mismatch with the live process's resolved mode,
@@ -1645,7 +1651,14 @@ export interface CLIConfig {
   model?: string;
   baseUrl?: string;
   provider?:
-    'openai' | 'openrouter' | 'azure' | 'custom' | 'cursor' | 'claude' | 'codex' | 'opencode';
+    | 'openai'
+    | 'openrouter'
+    | 'azure'
+    | 'custom'
+    | 'cursor'
+    | 'claude'
+    | 'codex'
+    | 'opencode';
   cursorModel?: string;
   claudeModel?: string;
   codexModel?: string;

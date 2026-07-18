@@ -27,7 +27,10 @@ export interface CallableFlowOperand {
    * designator rather than a value produced by an expression.
    */
   readonly expressionKind?:
-    'binding' | 'callable-designator' | 'bound-member' | 'anonymous-callable';
+    | 'binding'
+    | 'callable-designator'
+    | 'bound-member'
+    | 'anonymous-callable';
   /** Qualified spelling retained for receiver/member-aware lookup. */
   readonly qualifiedName?: string;
 }
