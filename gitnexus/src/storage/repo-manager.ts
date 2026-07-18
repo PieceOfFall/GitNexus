@@ -355,13 +355,19 @@ export interface RepoMeta {
  * writeback preserves unchanged-file rows, so a top-up against a pre-v6 index
  * would MIX old 1-based rows with new 0-based ones — and the 1-based MCP display
  * would render the stale rows one line too high — so force a full re-analyze.
- * v7: `Class` gained the `frameworkAnnotations` evidence column, and
- * callable-value-flow CALLS/USES edges were added (#2437/#2522). Incremental
- * writeback only covers changed files and keeps unchanged Class rows, so topping
- * up a pre-v7 index would leave both the annotation inventory and new edges
- * incomplete; force a full re-analyze instead (same contract as v2–v6).
+ * v7: callable-value-flow CALLS/USES edges added (#2437/#2522) — new edges can
+ * connect two files whose content did not change, but the incremental write set
+ * only covers changed files (`computeEffectiveWriteSet`), so a top-up against a
+ * pre-v7 index would silently omit the new edges for every unchanged file pair;
+ * force a full re-analyze instead (same contract as v2–v6).
+ * v8: Java anonymous class bodies became first-class Class nodes (#2550):
+ * `new Runnable() { run(){} }` now emits `Class:...:Worker$1` and its methods
+ * re-keyed from `Worker.run` to `Worker$1.run`. Node identities move on
+ * unchanged files — a top-up against a pre-v8 index would strand the old
+ * `Worker.run`-keyed Method nodes alongside the new ones (the v5 Route
+ * precedent); force a full re-analyze instead.
  */
-export const INCREMENTAL_SCHEMA_VERSION = 7;
+export const INCREMENTAL_SCHEMA_VERSION = 8;
 
 export interface IndexedRepo {
   repoPath: string;

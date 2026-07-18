@@ -14,9 +14,13 @@
  * The returned captures are deterministic. Class-annotation facts are also
  * recorded for the worker side-channel consumed after scope resolution.
  */
-
 import { makeScopeId, type Capture, type CaptureMatch, type ScopeId } from 'gitnexus-shared';
-import { nodeIfType, nodeToCapture, syntheticCapture } from '../../utils/ast-helpers.js';
+import {
+  nodeIfType,
+  nodeToCapture,
+  synthesizeJavaAnonymousClassName,
+  syntheticCapture,
+} from '../../utils/ast-helpers.js';
 import { splitImportDeclaration } from './import-decomposer.js';
 import { computeJavaArityMetadata } from './arity-metadata.js';
 import { synthesizeJavaReceiverBinding } from './receiver-binding.js';
@@ -265,8 +269,80 @@ export function emitJavaScopeCaptures(
     ...resolveVarTypeBindings(out),
     ...synthesizeJavaInheritanceReferences(tree.rootNode),
     ...synthesizeJavaExplicitConstructorReferences(tree.rootNode),
+    ...synthesizeJavaAnonymousClassDeclarations(tree.rootNode),
     ...synthesizeCallableFlowCaptures(tree.rootNode, JAVA_CALLABLE_CAPTURE_OPTIONS),
   ];
+}
+
+/**
+ * Synthesize `@declaration.class` matches for anonymous class bodies
+ * (`new Runnable() { ... }`), named by the same javac-style authority
+ * (`synthesizeJavaAnonymousClassName` → `Worker$N`) the structure phase
+ * uses — the two layers agree by construction (#2550).
+ *
+ * The anchor is the `class_body` node: it shares its range with the
+ * `(object_creation_expression (class_body) @scope.class)` scope rule in
+ * query.ts, so the def is owned by that Class scope's `ownedDefs`
+ * (making `populateClassOwnedMembers` stamp `ownerId` on the anonymous
+ * class's methods) and the name auto-hoists to the enclosing scope —
+ * exactly the binding shape a named class declaration produces.
+ */
+function synthesizeJavaAnonymousClassDeclarations(rootNode: SyntaxNode): CaptureMatch[] {
+  const out: CaptureMatch[] = [];
+  for (const oce of rootNode.descendantsOfType('object_creation_expression')) {
+    const name = synthesizeJavaAnonymousClassName(oce);
+    if (name === undefined) continue;
+    const body = oce.namedChildren.find((c) => c.type === 'class_body');
+    if (body === undefined) continue;
+    out.push({
+      '@declaration.class': nodeToCapture('@declaration.class', body),
+      '@declaration.name': syntheticCapture('@declaration.name', body, name),
+    });
+
+    // Inheritance: the anonymous class extends/implements its constructed
+    // type. Anchor the `@reference.inherits` on the `class_body` — its
+    // range equals the anonymous Class scope, so the reference site's
+    // enclosing class resolves to the SYNTHESIZED `Worker$N` def (anchoring
+    // on the constructed-type node would sit OUTSIDE the anonymous scope
+    // and mis-attribute the edge to the lexically enclosing class). The
+    // synthetic `@reference.name` carries the base's simple name; a JDK
+    // type with no repo def simply resolves to nothing (no edge). Without
+    // this edge `mroFor(Worker$N)` is empty and the #2550 instance-
+    // ownership gate suppressed TRUE bare calls to inherited methods
+    // inside the anonymous body (empirically caught in review).
+    const constructedType = oce.childForFieldName?.('type');
+    const baseSimpleName =
+      constructedType !== null && constructedType !== undefined
+        ? javaBaseSimpleNameOf(constructedType)
+        : undefined;
+    if (baseSimpleName !== undefined) {
+      out.push({
+        '@reference.inherits': nodeToCapture('@reference.inherits', body),
+        '@reference.name': syntheticCapture('@reference.name', body, baseSimpleName),
+      });
+    }
+
+    // Receiver typeBinding: `Runnable handler = new Runnable() { ... }`
+    // binds `handler` to the ANONYMOUS class (`Worker$1`), not the declared
+    // interface — the instance is what `handler.run()` dispatches into, and
+    // the declared type is frequently a JDK interface with no repo def.
+    // Appended after the raw matches, so it overwrites the declared-type
+    // binding the `@type-binding.annotation` query rule produced for the
+    // same variable (pass-4 applies bindings in match order; last wins).
+    const declarator = oce.parent;
+    if (declarator !== null && declarator.type === 'variable_declarator') {
+      const varName = declarator.childForFieldName?.('name');
+      const declNode = declarator.parent ?? declarator;
+      if (varName !== null && varName !== undefined) {
+        out.push({
+          '@type-binding.annotation': nodeToCapture('@type-binding.annotation', declNode),
+          '@type-binding.name': nodeToCapture('@type-binding.name', varName),
+          '@type-binding.type': syntheticCapture('@type-binding.type', oce, name),
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -454,6 +530,14 @@ function emitJavaInheritanceBase(out: CaptureMatch[], base: SyntaxNode | null): 
 }
 
 /** Resolve a Java base-type node to its bare simple-name identifier node. */
+/** Simple name of a constructed/base type node, reusing the same node
+ *  shapes `javaBaseLookupNameNode` handles (`Runnable`, `a.b.Base`,
+ *  `Box<T>`). Returns undefined when the node is none of those. */
+function javaBaseSimpleNameOf(typeNode: SyntaxNode): string | undefined {
+  const nameNode = javaBaseLookupNameNode(typeNode);
+  return nameNode === null ? undefined : nameNode.text;
+}
+
 function javaBaseLookupNameNode(node: SyntaxNode): SyntaxNode | null {
   switch (node.type) {
     case 'type_identifier':
