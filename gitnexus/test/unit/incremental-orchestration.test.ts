@@ -75,6 +75,22 @@ async function setupSpringBeanIncrementalRepo() {
   return repo;
 }
 
+async function setupKotlinSpringBeanIncrementalRepo() {
+  const repo = await createTempDir('gitnexus-incr-spring-bean-kotlin-');
+  const src = path.join(repo.dbPath, 'src', 'com', 'other');
+  await mkdir(src, { recursive: true });
+  await writeFile(
+    path.join(src, 'WildcardService.kt'),
+    'package com.other\n' +
+      'import org.springframework.stereotype.*\n\n' +
+      '@Service class WildcardService\n',
+    'utf-8',
+  );
+  execSync('git init', { cwd: repo.dbPath, stdio: 'pipe' });
+  gitCommitAll(repo.dbPath, 'initial Kotlin spring bean candidate');
+  return repo;
+}
+
 async function readWildcardServiceAnnotations(repoPath: string): Promise<string[]> {
   const adapter = await import('../../src/core/lbug/lbug-adapter.js');
   const { lbugPath } = getStoragePaths(repoPath);
@@ -227,7 +243,7 @@ describe('runFullAnalysis — incremental orchestration', () => {
     }
   }, 300_000);
 
-  it('skips the framework annotation drift query when no Java source changed', async () => {
+  it('skips the framework annotation drift query when no Bean source changed', async () => {
     const repo = await setupMiniRepo();
     try {
       const adapter = await import('../../src/core/lbug/lbug-adapter.js');
@@ -236,7 +252,7 @@ describe('runFullAnalysis — incremental orchestration', () => {
 
       const target = path.join(repo.dbPath, 'src', 'logger.ts');
       const before = await readFile(target, 'utf-8');
-      await writeFile(target, before + '\n// non-java incremental touch\n', 'utf-8');
+      await writeFile(target, before + '\n// non-bean-source incremental touch\n', 'utf-8');
 
       const querySpy = vi.spyOn(adapter, 'executeQuery');
       try {
@@ -336,6 +352,30 @@ describe('runFullAnalysis — incremental orchestration', () => {
 
       await rm(shadow);
       gitCommitAll(repo.dbPath, 'remove same-package annotation shadow');
+
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([SPRING_SERVICE]);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 600_000);
+
+  it('rewrites unchanged Kotlin Spring bean metadata when same-package shadowing changes', async () => {
+    const repo = await setupKotlinSpringBeanIncrementalRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([SPRING_SERVICE]);
+
+      const shadow = path.join(repo.dbPath, 'src', 'com', 'other', 'Service.kt');
+      await writeFile(shadow, 'package com.other\nannotation class Service\n', 'utf-8');
+      gitCommitAll(repo.dbPath, 'add same-package Kotlin annotation shadow');
+
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([]);
+
+      await rm(shadow);
+      gitCommitAll(repo.dbPath, 'remove same-package Kotlin annotation shadow');
 
       await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
       expect(await readWildcardServiceAnnotations(repo.dbPath)).toEqual([SPRING_SERVICE]);
@@ -560,30 +600,24 @@ describe('runFullAnalysis — incremental orchestration', () => {
     }
   }, 300_000);
 
-  // Regression for #2289 review P1: a pre-v5 stamp (e.g. v4 with url-only
-  // Route ids) re-analyzed on the SAME commit must NOT early-return on the
-  // `alreadyUpToDate` fast path — otherwise the v5 schema bump's
-  // re-keyed-Route migration is silently bypassed and stale URL-only Route
-  // rows persist alongside any new composite-keyed writes. The schemaVersion
-  // gate (mirrors pdgModeMismatch's slot above the fast path) must force a
-  // full rebuild before lastCommit-equality short-circuits the pipeline.
-  it('a pre-v5 schemaVersion stamp forces a full rebuild on an unchanged-commit re-analyze', async () => {
+  // A v7 index already has the frameworkAnnotations column but predates
+  // Kotlin Bean evidence. Re-analyzing it on the SAME commit must not take the
+  // alreadyUpToDate fast path: the v8 semantic bump has to force a full rebuild
+  // before lastCommit equality can short-circuit the pipeline.
+  it('a v7 schemaVersion stamp forces a full rebuild on an unchanged-commit re-analyze', async () => {
     const repo = await setupMiniRepo();
     try {
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
-      // First run stamps schemaVersion = INCREMENTAL_SCHEMA_VERSION (v5).
+      // First run stamps the current schema version (v8).
       await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
       const { storagePath } = getStoragePaths(repo.dbPath);
       const meta = await loadMeta(storagePath);
       expect(meta).not.toBeNull();
       expect(meta!.schemaVersion).toBe(INCREMENTAL_SCHEMA_VERSION);
 
-      // Simulate a repo indexed at the SAME commit by a pre-v5 GitNexus
-      // build: rewrite meta.json with schemaVersion = 4. lastCommit and
-      // working tree are untouched, so without the schemaVersion gate the
-      // run-analyze fast path would early-return `alreadyUpToDate=true`
-      // and never touch the stale Route rows.
-      const downgraded: RepoMeta = { ...meta!, schemaVersion: 4 };
+      // Simulate a Java-only Bean index at the same commit. Without the v8
+      // guard this would return alreadyUpToDate before parse-cache v14 is read.
+      const downgraded: RepoMeta = { ...meta!, schemaVersion: 7 };
       await saveMeta(storagePath, downgraded);
 
       const reanalyzed = await runFullAnalysis(
@@ -593,7 +627,7 @@ describe('runFullAnalysis — incremental orchestration', () => {
       );
       // Pipeline actually ran (schemaVersion mismatch → force=true).
       expect(reanalyzed.alreadyUpToDate).toBeUndefined();
-      // And the meta is stamped back to v5 (the rebuild path runs saveMeta).
+      // And the meta is stamped back to v8 (the rebuild path runs saveMeta).
       const restamped = await loadMeta(storagePath);
       expect(restamped!.schemaVersion).toBe(INCREMENTAL_SCHEMA_VERSION);
     } finally {

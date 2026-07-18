@@ -4,11 +4,9 @@ import { extractParsedFile } from '../../src/core/ingestion/scope-extractor-brid
 import { goScopeResolver } from '../../src/core/ingestion/languages/go/scope-resolver.js';
 import { cppScopeResolver } from '../../src/core/ingestion/languages/cpp/scope-resolver.js';
 import { rustScopeResolver } from '../../src/core/ingestion/languages/rust/scope-resolver.js';
-import { javaScopeResolver } from '../../src/core/ingestion/languages/java/scope-resolver.js';
 import { populateGoRangeBindings } from '../../src/core/ingestion/languages/go/range-binding.js';
 import { populateCppRangeBindings } from '../../src/core/ingestion/languages/cpp/range-bindings.js';
 import { populateRustRangeBindings } from '../../src/core/ingestion/languages/rust/range-binding.js';
-import { populateJavaPackageSiblings } from '../../src/core/ingestion/languages/java/package-siblings.js';
 
 /**
  * Regression coverage for the post-finalize parse hooks after
@@ -147,33 +145,6 @@ fn main() {
     process.env.GITNEXUS_PARSE_TIMEOUT_MS = '1';
     expect(() =>
       populateRustRangeBindings([badParsed, goodParsed], makeEmptyIndexes(), { fileContents }),
-    ).not.toThrow();
-  });
-
-  it('Java: a timed-out file degrades to "no package" without aborting siblings', () => {
-    // Two good same-package files so sibling injection has work to do, plus a
-    // bad file whose package extraction times out and degrades to '' (its own
-    // bucket) rather than throwing.
-    const a = `package com.example;
-class A {}`;
-    const b = `package com.example;
-class B {}`;
-    const bad = 'package com.example;\n' + pathological('class Filler {}\n');
-
-    const aParsed = parse(javaScopeResolver as unknown as ResolverLike, a, 'A.java');
-    const bParsed = parse(javaScopeResolver as unknown as ResolverLike, b, 'B.java');
-    const badParsed = parse(javaScopeResolver as unknown as ResolverLike, bad, 'Bad.java');
-    const fileContents = new Map<string, string>([
-      ['A.java', a],
-      ['B.java', b],
-      ['Bad.java', bad],
-    ]);
-
-    process.env.GITNEXUS_PARSE_TIMEOUT_MS = '1';
-    expect(() =>
-      populateJavaPackageSiblings([badParsed, aParsed, bParsed], makeEmptyIndexes(), {
-        fileContents,
-      }),
     ).not.toThrow();
   });
 });

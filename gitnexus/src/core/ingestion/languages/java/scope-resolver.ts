@@ -34,6 +34,7 @@ import {
   applyJavaCaptureSideChannel,
   clearJavaClassAnnotationFacts,
 } from './capture-side-channel.js';
+import { clearJavaPackageFacts } from './package-facts.js';
 
 const javaScopeResolver: ScopeResolver = {
   language: SupportedLanguages.Java,
@@ -45,6 +46,7 @@ const javaScopeResolver: ScopeResolver = {
     // server mode. This hook runs once before each Java workspace pass, before
     // ParsedFile side channels are restored for the current files.
     clearJavaClassAnnotationFacts();
+    clearJavaPackageFacts();
     return undefined;
   },
 

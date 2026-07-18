@@ -10,11 +10,13 @@ vi.mock('../../src/storage/repo-manager.js', () => ({
 }));
 
 const BEAN_ID = 'Class:src/BillingService.java:BillingService';
+const KOTLIN_BEAN_ID = 'Class:src/KotlinBillingService.kt:KotlinBillingService';
 const PLAIN_ID = 'Class:src/PlainUtility.java:PlainUtility';
 const NON_JAVA_ID = 'Class:src/AppProvider.ts:AppProvider';
 const CONFLICT_ID = 'Class:src/ConflictingBean.java:ConflictingBean';
 const SEED = [
   `CREATE (c:Class {id:'${BEAN_ID}', name:'BillingService', filePath:'src/BillingService.java', startLine:0, endLine:3, isExported:false, content:'class BillingService {}', description:'', frameworkAnnotations:['org.springframework.stereotype.Service']})`,
+  `CREATE (c:Class {id:'${KOTLIN_BEAN_ID}', name:'KotlinBillingService', filePath:'src/KotlinBillingService.kt', startLine:0, endLine:3, isExported:false, content:'class KotlinBillingService', description:'', frameworkAnnotations:['org.springframework.stereotype.Service']})`,
   `CREATE (c:Class {id:'${PLAIN_ID}', name:'PlainUtility', filePath:'src/PlainUtility.java', startLine:0, endLine:1, isExported:false, content:'class PlainUtility {}', description:'', frameworkAnnotations:[]})`,
   `CREATE (c:Class {id:'${NON_JAVA_ID}', name:'AppProvider', filePath:'src/AppProvider.ts', startLine:0, endLine:1, isExported:true, content:'class AppProvider {}', description:'', frameworkAnnotations:['@nestjs/common.Injectable']})`,
   `CREATE (c:Class {id:'${CONFLICT_ID}', name:'ConflictingBean', filePath:'src/ConflictingBean.java', startLine:0, endLine:1, isExported:false, content:'class ConflictingBean {}', description:'', frameworkAnnotations:['org.springframework.stereotype.Service', 'org.springframework.stereotype.Component']})`,
@@ -30,9 +32,14 @@ withTestLbugDB(
     });
 
     describe('Bean metadata MCP enrichment', () => {
-      it('returns the same nested Bean shape from context and impact', async () => {
-        const context = await backend.callTool('context', { uid: BEAN_ID });
-        const impact = await backend.callTool('impact', {
+      it('returns the same nested Bean shape for Java and Kotlin from context and impact', async () => {
+        const javaContext = await backend.callTool('context', { uid: BEAN_ID });
+        const kotlinContext = await backend.callTool('context', { uid: KOTLIN_BEAN_ID });
+        const kotlinImpact = await backend.callTool('impact', {
+          target: 'KotlinBillingService',
+          direction: 'upstream',
+        });
+        const javaImpact = await backend.callTool('impact', {
           target: 'BillingService',
           direction: 'upstream',
         });
@@ -42,8 +49,10 @@ withTestLbugDB(
           role: 'service',
           annotation: 'org.springframework.stereotype.Service',
         };
-        expect(context.symbol.bean).toEqual(expectedBean);
-        expect(impact.target.bean).toEqual(expectedBean);
+        expect(javaContext.symbol.bean).toEqual(expectedBean);
+        expect(kotlinContext.symbol.bean).toEqual(expectedBean);
+        expect(javaImpact.target.bean).toEqual(expectedBean);
+        expect(kotlinImpact.target.bean).toEqual(expectedBean);
       });
 
       it('omits Bean metadata for an ordinary Class', async () => {

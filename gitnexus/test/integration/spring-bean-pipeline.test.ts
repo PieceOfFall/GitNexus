@@ -62,6 +62,45 @@ describe('Spring Bean candidate inventory pipeline', () => {
     }
   });
 
+  it('uses the same candidate rules for Kotlin classes', () => {
+    const symbols = new Map<string, Record<string, unknown>>();
+    result.graph.forEachNode((node) => {
+      symbols.set(String(node.properties.name), node.properties);
+    });
+
+    expect(symbols.get('KotlinWidgetComponent')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Component',
+    ]);
+    expect(symbols.get('KotlinBillingService')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
+    expect(symbols.get('KotlinConfiguration')?.frameworkAnnotations).toEqual([
+      'org.springframework.context.annotation.Configuration',
+    ]);
+    expect(symbols.get('KotlinAbstractService')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
+    expect(symbols.get('KotlinNestedService')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Service',
+    ]);
+    expect(symbols.get('KotlinWildcardRepository')?.frameworkAnnotations).toEqual([
+      'org.springframework.stereotype.Repository',
+    ]);
+
+    for (const name of [
+      'KotlinServiceContract',
+      'KotlinServiceObject',
+      'KotlinServiceState',
+      'KotlinServiceMarker',
+      'KotlinComposedCandidate',
+      'KotlinMemberShadowedService',
+      'KotlinShadowedService',
+      'KotlinMultipleWildcardService',
+    ]) {
+      expect(symbols.get(name)).not.toHaveProperty('frameworkAnnotations');
+    }
+  });
+
   it('keeps RestController route discovery and HANDLES_ROUTE emission intact', () => {
     let pingRouteId: string | undefined;
     result.graph.forEachNode((node) => {

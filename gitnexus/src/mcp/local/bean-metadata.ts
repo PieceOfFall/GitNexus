@@ -2,7 +2,7 @@ import { executeParameterized } from '../../core/lbug/pool-adapter.js';
 import {
   deriveSpringBeanMetadata,
   type SpringBeanMetadata,
-} from '../../core/ingestion/languages/java/spring-bean-stereotypes.js';
+} from '../../core/ingestion/frameworks/spring/bean-catalog.js';
 
 export async function queryClassBeanMetadata(
   lbugPath: string,

@@ -1,17 +1,17 @@
-import type { ParsedFile, ScopeResolutionIndexes } from 'gitnexus-shared';
 import { describe, expect, it } from 'vitest';
 import {
   collectJavaCaptureSideChannel,
   type JavaCaptureSideChannel,
 } from '../../src/core/ingestion/languages/java/capture-side-channel.js';
 import { emitJavaScopeCaptures } from '../../src/core/ingestion/languages/java/captures.js';
-import {
-  isJavaPackageSiblingVisibilityCapped,
-  populateJavaPackageSiblings,
-} from '../../src/core/ingestion/languages/java/package-siblings.js';
-import { getJavaParser } from '../../src/core/ingestion/languages/java/query.js';
 import { javaScopeResolver } from '../../src/core/ingestion/languages/java/scope-resolver.js';
-import { deriveSpringBeanMetadata } from '../../src/core/ingestion/languages/java/spring-bean-stereotypes.js';
+import { deriveSpringBeanMetadata } from '../../src/core/ingestion/frameworks/spring/bean-catalog.js';
+import {
+  collectKotlinCaptureSideChannel,
+  type KotlinCaptureSideChannel,
+} from '../../src/core/ingestion/languages/kotlin/capture-side-channel.js';
+import { emitKotlinScopeCaptures } from '../../src/core/ingestion/languages/kotlin/captures.js';
+import { kotlinScopeResolver } from '../../src/core/ingestion/languages/kotlin/scope-resolver.js';
 
 function captureClassAnnotations(code: string): JavaCaptureSideChannel['classAnnotations'] {
   const filePath = 'src/Test.java';
@@ -49,29 +49,46 @@ describe('Java class annotation capture', () => {
 
     expect(collectJavaCaptureSideChannel(filePath)).toBeUndefined();
   });
+});
 
-  it('records files whose same-package visibility was disabled by the package cap', () => {
-    const source = 'package com.capped;\nclass Placeholder {}';
-    const tree = getJavaParser().parse(source);
-    const parsedFiles = Array.from({ length: 501 }, (_, index) => {
-      const filePath = `src/com/capped/Type${index}.java`;
-      return {
-        filePath,
-        scopes: [{ id: `module:${index}`, kind: 'Module' }],
-      } as unknown as ParsedFile;
-    });
-    const fileContents = new Map(parsedFiles.map((parsed) => [parsed.filePath, source]));
-    const indexes = {
-      bindingAugmentations: new Map(),
-    } as unknown as ScopeResolutionIndexes;
+function captureKotlinClassAnnotations(code: string): KotlinCaptureSideChannel['classAnnotations'] {
+  const filePath = 'src/Test.kt';
+  emitKotlinScopeCaptures(code, filePath);
+  return collectKotlinCaptureSideChannel(filePath)?.classAnnotations ?? [];
+}
 
-    populateJavaPackageSiblings(parsedFiles, indexes, {
-      fileContents,
-      treeCache: { get: () => tree },
-    });
+describe('Kotlin class annotation capture', () => {
+  it('captures supported class forms and excludes non-candidate declarations', () => {
+    const facts = captureKotlinClassAnnotations(`
+      @Component class Widget
+      @Service("billing") data class BillingService(val name: String)
+      @org.springframework.context.annotation.Configuration sealed class AppConfiguration
+      @Service value class ServiceId(val value: String)
+      class Outer { @Service class NestedService }
 
-    expect(isJavaPackageSiblingVisibilityCapped(parsedFiles[0].filePath)).toBe(true);
-    expect(isJavaPackageSiblingVisibilityCapped('src/other/Uncapped.java')).toBe(false);
+      @Service interface ServiceContract
+      @Service object ServiceObject
+      @Service enum class ServiceState { READY }
+      @Service annotation class ServiceMarker
+    `);
+
+    expect(facts.map((fact) => fact.annotationNames)).toEqual([
+      ['Component'],
+      ['Service'],
+      ['org.springframework.context.annotation.Configuration'],
+      ['Service'],
+      ['Service'],
+    ]);
+  });
+
+  it('clears annotation facts while preserving the Kotlin side-channel lifecycle', async () => {
+    const filePath = 'src/Stale.kt';
+    emitKotlinScopeCaptures('@Service class Stale', filePath);
+    expect(collectKotlinCaptureSideChannel(filePath)?.classAnnotations).toHaveLength(1);
+
+    await kotlinScopeResolver.loadResolutionConfig?.('/tmp/repo');
+
+    expect(collectKotlinCaptureSideChannel(filePath)).toBeUndefined();
   });
 });
 

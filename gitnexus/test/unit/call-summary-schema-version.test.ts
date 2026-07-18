@@ -73,8 +73,8 @@ describe('CALL_SUMMARY relation-type exclusion (U-C1)', () => {
 });
 
 describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
-  it('INCREMENTAL_SCHEMA_VERSION is bumped to 7 (Class framework annotation evidence)', () => {
-    expect(INCREMENTAL_SCHEMA_VERSION).toBe(7);
+  it('INCREMENTAL_SCHEMA_VERSION is bumped to 8 (Kotlin framework annotation evidence)', () => {
+    expect(INCREMENTAL_SCHEMA_VERSION).toBe(8);
   });
 
   it('a pre-current stamp fails the `=== INCREMENTAL_SCHEMA_VERSION` reuse gate → forces full re-analyze', () => {
@@ -97,7 +97,9 @@ describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
     expect(passesReuseGate(5)).toBe(false);
     // A pre-v7 (v6) index has no Class frameworkAnnotations column.
     expect(passesReuseGate(6)).toBe(false);
+    // A pre-v8 (v7) index has the column but no Kotlin Bean evidence.
+    expect(passesReuseGate(7)).toBe(false);
     // A current-version stamp passes the gate (incremental top-up eligible).
-    expect(passesReuseGate(7)).toBe(true);
+    expect(passesReuseGate(8)).toBe(true);
   });
 });

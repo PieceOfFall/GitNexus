@@ -33,3 +33,11 @@ export function deriveSpringBeanMetadata(
 
   return { framework: 'spring', role: stereotype.role, annotation };
 }
+
+const SPRING_BEAN_SOURCE_EXTENSIONS = ['.java', '.kt', '.kts'] as const;
+
+/** Whether a source change can alter Spring Bean candidate metadata. */
+export function isSpringBeanCandidateSourceFile(filePath: string): boolean {
+  const normalized = filePath.toLowerCase();
+  return SPRING_BEAN_SOURCE_EXTENSIONS.some((extension) => normalized.endsWith(extension));
+}

@@ -15,7 +15,11 @@
  * recorded for the worker side-channel consumed after scope resolution.
  */
 
-import { makeScopeId, type Capture, type CaptureMatch, type ScopeId } from 'gitnexus-shared';
+import type { Capture, CaptureMatch, ScopeId } from 'gitnexus-shared';
+import {
+  materializeClassAnnotationFacts,
+  recordClassAnnotationCapture,
+} from '../../frameworks/spring/bean-candidates.js';
 import { nodeIfType, nodeToCapture, syntheticCapture } from '../../utils/ast-helpers.js';
 import { splitImportDeclaration } from './import-decomposer.js';
 import { computeJavaArityMetadata } from './arity-metadata.js';
@@ -25,6 +29,7 @@ import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
 import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
 import { setJavaClassAnnotationFacts } from './capture-side-channel.js';
+import { captureJavaPackageFact } from './package-facts.js';
 
 /** Declaration anchors that carry function-like arity metadata. */
 const FUNCTION_DECL_TAGS = ['@declaration.method', '@declaration.constructor'] as const;
@@ -61,6 +66,7 @@ export function emitJavaScopeCaptures(
   } else {
     recordCacheHit();
   }
+  captureJavaPackageFact(filePath, tree.rootNode);
 
   const rawMatches = getJavaScopeQuery().matches(tree.rootNode);
   const out: CaptureMatch[] = [];
@@ -87,14 +93,7 @@ export function emitJavaScopeCaptures(
     const annotatedClass = grouped['@class-annotation.class'];
     const annotationName = grouped['@class-annotation.name'];
     if (annotatedClass !== undefined && annotationName !== undefined) {
-      const classScopeId = makeScopeId({
-        filePath,
-        range: annotatedClass.range,
-        kind: 'Class',
-      });
-      const names = classAnnotations.get(classScopeId) ?? new Set<string>();
-      names.add(annotationName.text.trim());
-      classAnnotations.set(classScopeId, names);
+      recordClassAnnotationCapture(classAnnotations, filePath, annotatedClass, annotationName.text);
       continue;
     }
 
@@ -233,13 +232,7 @@ export function emitJavaScopeCaptures(
     out.push(grouped);
   }
 
-  setJavaClassAnnotationFacts(
-    filePath,
-    [...classAnnotations].map(([classScopeId, annotationNames]) => ({
-      classScopeId,
-      annotationNames: [...annotationNames],
-    })),
-  );
+  setJavaClassAnnotationFacts(filePath, materializeClassAnnotationFacts(classAnnotations));
 
   return [
     ...resolveVarTypeBindings(out),

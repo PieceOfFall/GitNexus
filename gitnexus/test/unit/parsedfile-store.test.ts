@@ -193,8 +193,8 @@ describe('parsedfile-store', () => {
     }
   });
 
-  // #1983 (Kotlin): the kotlin provider carries a self-describing companion-
-  // scope side-channel `{ kind: 'kotlin', companionScopes: ScopeId[] }`. It
+  // #1983 (Kotlin): the kotlin provider carries a self-describing capture
+  // side-channel containing companion scopes and class annotation facts. It
   // shares the single generic `captureSideChannel` field with C++, so confirm
   // the (Set→array) plain-data shape survives the JSON store round-trip too.
   it('round-trips a Kotlin ParsedFile.captureSideChannel through the store', async () => {
@@ -203,6 +203,13 @@ describe('parsedfile-store', () => {
       const sideChannel = {
         kind: 'kotlin',
         companionScopes: ['scope:Logger.companion', 'scope:Animal.companion'],
+        packageFact: { status: 'known', packageName: 'com.example' },
+        classAnnotations: [
+          {
+            classScopeId: 'scope:App.kt#1:0-2:0:Class',
+            annotationNames: ['Service'],
+          },
+        ],
       };
       const pf = {
         ...(makeParsedFile('App.kt') as unknown as Record<string, unknown>),

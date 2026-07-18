@@ -358,8 +358,12 @@ export interface RepoMeta {
  * v7: `Class` gained the `frameworkAnnotations` evidence column. Incremental
  * writeback keeps unchanged Class rows, so a pre-v7 top-up would leave that
  * inventory incomplete; force a full re-analyze instead.
+ * v8: Spring Bean candidate extraction expanded from Java to Kotlin. The
+ * column shape is unchanged, but a clean same-commit v7 index has no Kotlin
+ * evidence and would otherwise return `alreadyUpToDate` before parse-cache
+ * invalidation runs; force a one-time full rebuild to populate those rows.
  */
-export const INCREMENTAL_SCHEMA_VERSION = 7;
+export const INCREMENTAL_SCHEMA_VERSION = 8;
 
 export interface IndexedRepo {
   repoPath: string;
@@ -1637,14 +1641,7 @@ export interface CLIConfig {
   model?: string;
   baseUrl?: string;
   provider?:
-    | 'openai'
-    | 'openrouter'
-    | 'azure'
-    | 'custom'
-    | 'cursor'
-    | 'claude'
-    | 'codex'
-    | 'opencode';
+    'openai' | 'openrouter' | 'azure' | 'custom' | 'cursor' | 'claude' | 'codex' | 'opencode';
   cursorModel?: string;
   claudeModel?: string;
   codexModel?: string;

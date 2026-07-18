@@ -119,6 +119,7 @@ import { generateAIContextFiles } from '../cli/ai-context.js';
 import { sanitizeDetectedBranch } from '../cli/analyze-config.js';
 import { EMBEDDING_TABLE_NAME } from './lbug/schema.js';
 import { STALE_HASH_SENTINEL } from './lbug/schema.js';
+import { isSpringBeanCandidateSourceFile } from './ingestion/frameworks/spring/bean-catalog.js';
 
 interface PersistedFrameworkAnnotationRow {
   readonly id?: unknown;
@@ -1485,21 +1486,21 @@ export async function runFullAnalysis(
       //    leave stale rows or PK-conflict at COPY time.
       const effectiveWriteSet = computeEffectiveWriteSet(pipelineResult.graph, writableFiles);
 
-      // `frameworkAnnotations` is derived from cross-file Java visibility, so
+      // `frameworkAnnotations` is derived from cross-file JVM visibility, so
       // an unchanged Class row can change when a same-package declaration is
       // added or removed without producing an IMPORTS edge. Compare the fresh
       // graph against the pre-write DB and rewrite only files whose persisted
       // value drifted. Add them after edge-boundary expansion: relationships
       // touching these files are already included by extractChangedSubgraph,
       // while pulling every unchanged neighbor would add no correctness.
-      // Only Java source changes can alter this visibility-derived property;
+      // Only supported Spring Bean source changes can alter this property;
       // avoid materializing every persisted Class row for unrelated language
       // updates. Check deleted paths too so removing/renaming a Java shadowing
       // declaration still refreshes unchanged Spring candidates.
-      const javaSourceChanged =
-        hashDiff.toWrite.some((filePath) => filePath.toLowerCase().endsWith('.java')) ||
-        hashDiff.deleted.some((filePath) => filePath.toLowerCase().endsWith('.java'));
-      if (javaSourceChanged) {
+      const beanSourceChanged =
+        hashDiff.toWrite.some(isSpringBeanCandidateSourceFile) ||
+        hashDiff.deleted.some(isSpringBeanCandidateSourceFile);
+      if (beanSourceChanged) {
         const persistedFrameworkAnnotations = (await executeQuery(
           'MATCH (c:Class) ' + 'RETURN c.id AS id, c.frameworkAnnotations AS frameworkAnnotations',
         )) as PersistedFrameworkAnnotationRow[];
