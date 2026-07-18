@@ -55,7 +55,7 @@ import type { ParseWorkerResult } from '../core/ingestion/workers/parse-worker.j
 // the main thread (the #1983 OOM). Because the two stores share this version,
 // any future change to the `ParsedFile` serialization shape MUST bump
 // SCHEMA_BUMP so both invalidate in lockstep.
-const SCHEMA_BUMP = 14; // Kotlin capture-side-channel payloads now persist class annotation facts for shared Spring Bean candidate resolution. Invalidate v13 so cached ParsedFiles cannot silently omit them. (13 = durable ParsedFile generation replacement.)
+const SCHEMA_BUMP = 19; // Java/Kotlin capture side-channels now persist package and class-annotation facts for shared Spring Bean resolution. (18 = Java anonymous-class node identity; 17 = callable-value-flow operand identity.)
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from

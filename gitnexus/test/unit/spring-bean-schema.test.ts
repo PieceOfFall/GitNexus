@@ -14,9 +14,10 @@ describe('Spring Bean Class persistence schema', () => {
     );
   });
 
-  it('invalidates parse and incremental caches that predate Bean metadata', () => {
-    expect(PARSE_CACHE_VERSION).toMatch(/^14\+/);
-    expect(INCREMENTAL_SCHEMA_VERSION).toBe(8);
+  it('meets the cache-version baselines required by the merged implementation', () => {
+    const parseSchemaVersion = Number.parseInt(PARSE_CACHE_VERSION, 10);
+    expect(parseSchemaVersion).toBeGreaterThanOrEqual(19);
+    expect(INCREMENTAL_SCHEMA_VERSION).toBeGreaterThanOrEqual(8);
   });
 
   it('limits incremental drift queries to Java and Kotlin Bean source files', () => {

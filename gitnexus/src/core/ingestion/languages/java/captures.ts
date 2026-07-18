@@ -14,13 +14,17 @@
  * The returned captures are deterministic. Class-annotation facts are also
  * recorded for the worker side-channel consumed after scope resolution.
  */
-
-import type { Capture, CaptureMatch, ScopeId } from 'gitnexus-shared';
+import { type Capture, type CaptureMatch, type ScopeId } from 'gitnexus-shared';
 import {
   materializeClassAnnotationFacts,
   recordClassAnnotationCapture,
 } from '../../frameworks/spring/bean-candidates.js';
-import { nodeIfType, nodeToCapture, syntheticCapture } from '../../utils/ast-helpers.js';
+import {
+  nodeIfType,
+  nodeToCapture,
+  synthesizeJavaAnonymousClassName,
+  syntheticCapture,
+} from '../../utils/ast-helpers.js';
 import { splitImportDeclaration } from './import-decomposer.js';
 import { computeJavaArityMetadata } from './arity-metadata.js';
 import { synthesizeJavaReceiverBinding } from './receiver-binding.js';
@@ -30,12 +34,32 @@ import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
 import { setJavaClassAnnotationFacts } from './capture-side-channel.js';
 import { captureJavaPackageFact } from './package-facts.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
 
 /** Declaration anchors that carry function-like arity metadata. */
 const FUNCTION_DECL_TAGS = ['@declaration.method', '@declaration.constructor'] as const;
 
 /** tree-sitter-java node types that the method extractor accepts. */
 const FUNCTION_NODE_TYPES = ['method_declaration', 'constructor_declaration'] as const;
+
+const JAVA_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set([...FUNCTION_NODE_TYPES, 'lambda_expression']),
+  callNodeTypes: new Set(['method_invocation']),
+  parameterListNodeTypes: new Set(['formal_parameters', 'argument_list']),
+  parameterNodeTypes: new Set(['formal_parameter', 'spread_parameter', 'receiver_parameter']),
+  bindingNodeTypes: new Set(['variable_declarator']),
+  assignmentNodeTypes: new Set(['assignment_expression']),
+  identifierNodeTypes: new Set(['identifier', 'type_identifier']),
+  callableReferenceNodeTypes: new Set(['method_reference']),
+  // java.util.function SAM names, MINUS 'get' and 'test': those two collide
+  // with ubiquitous non-functional APIs (Map/List/Optional/Future.get,
+  // Predicate-unrelated test methods), emitting a spurious callable-object
+  // invoke fact for every container access (#2522 review). Supplier.get /
+  // Predicate.test dispatch is deliberately traded away until the check can
+  // gate on the receiver's declared type.
+  callableProtocolMethods: new Set(['run', 'apply', 'accept', 'call']),
+  normalizeQualifiedName: (raw: string) => raw.replaceAll('::', '.'),
+} as const;
 
 /** Suppress read.member emissions when the field_access is already
  *  covered by a method_invocation (object of a call) or an
@@ -238,7 +262,80 @@ export function emitJavaScopeCaptures(
     ...resolveVarTypeBindings(out),
     ...synthesizeJavaInheritanceReferences(tree.rootNode),
     ...synthesizeJavaExplicitConstructorReferences(tree.rootNode),
+    ...synthesizeJavaAnonymousClassDeclarations(tree.rootNode),
+    ...synthesizeCallableFlowCaptures(tree.rootNode, JAVA_CALLABLE_CAPTURE_OPTIONS),
   ];
+}
+
+/**
+ * Synthesize `@declaration.class` matches for anonymous class bodies
+ * (`new Runnable() { ... }`), named by the same javac-style authority
+ * (`synthesizeJavaAnonymousClassName` → `Worker$N`) the structure phase
+ * uses — the two layers agree by construction (#2550).
+ *
+ * The anchor is the `class_body` node: it shares its range with the
+ * `(object_creation_expression (class_body) @scope.class)` scope rule in
+ * query.ts, so the def is owned by that Class scope's `ownedDefs`
+ * (making `populateClassOwnedMembers` stamp `ownerId` on the anonymous
+ * class's methods) and the name auto-hoists to the enclosing scope —
+ * exactly the binding shape a named class declaration produces.
+ */
+function synthesizeJavaAnonymousClassDeclarations(rootNode: SyntaxNode): CaptureMatch[] {
+  const out: CaptureMatch[] = [];
+  for (const oce of rootNode.descendantsOfType('object_creation_expression')) {
+    const name = synthesizeJavaAnonymousClassName(oce);
+    if (name === undefined) continue;
+    const body = oce.namedChildren.find((c) => c.type === 'class_body');
+    if (body === undefined) continue;
+    out.push({
+      '@declaration.class': nodeToCapture('@declaration.class', body),
+      '@declaration.name': syntheticCapture('@declaration.name', body, name),
+    });
+
+    // Inheritance: the anonymous class extends/implements its constructed
+    // type. Anchor the `@reference.inherits` on the `class_body` — its
+    // range equals the anonymous Class scope, so the reference site's
+    // enclosing class resolves to the SYNTHESIZED `Worker$N` def (anchoring
+    // on the constructed-type node would sit OUTSIDE the anonymous scope
+    // and mis-attribute the edge to the lexically enclosing class). The
+    // synthetic `@reference.name` carries the base's simple name; a JDK
+    // type with no repo def simply resolves to nothing (no edge). Without
+    // this edge `mroFor(Worker$N)` is empty and the #2550 instance-
+    // ownership gate suppressed TRUE bare calls to inherited methods
+    // inside the anonymous body (empirically caught in review).
+    const constructedType = oce.childForFieldName?.('type');
+    const baseSimpleName =
+      constructedType !== null && constructedType !== undefined
+        ? javaBaseSimpleNameOf(constructedType)
+        : undefined;
+    if (baseSimpleName !== undefined) {
+      out.push({
+        '@reference.inherits': nodeToCapture('@reference.inherits', body),
+        '@reference.name': syntheticCapture('@reference.name', body, baseSimpleName),
+      });
+    }
+
+    // Receiver typeBinding: `Runnable handler = new Runnable() { ... }`
+    // binds `handler` to the ANONYMOUS class (`Worker$1`), not the declared
+    // interface — the instance is what `handler.run()` dispatches into, and
+    // the declared type is frequently a JDK interface with no repo def.
+    // Appended after the raw matches, so it overwrites the declared-type
+    // binding the `@type-binding.annotation` query rule produced for the
+    // same variable (pass-4 applies bindings in match order; last wins).
+    const declarator = oce.parent;
+    if (declarator !== null && declarator.type === 'variable_declarator') {
+      const varName = declarator.childForFieldName?.('name');
+      const declNode = declarator.parent ?? declarator;
+      if (varName !== null && varName !== undefined) {
+        out.push({
+          '@type-binding.annotation': nodeToCapture('@type-binding.annotation', declNode),
+          '@type-binding.name': nodeToCapture('@type-binding.name', varName),
+          '@type-binding.type': syntheticCapture('@type-binding.type', oce, name),
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -426,6 +523,14 @@ function emitJavaInheritanceBase(out: CaptureMatch[], base: SyntaxNode | null): 
 }
 
 /** Resolve a Java base-type node to its bare simple-name identifier node. */
+/** Simple name of a constructed/base type node, reusing the same node
+ *  shapes `javaBaseLookupNameNode` handles (`Runnable`, `a.b.Base`,
+ *  `Box<T>`). Returns undefined when the node is none of those. */
+function javaBaseSimpleNameOf(typeNode: SyntaxNode): string | undefined {
+  const nameNode = javaBaseLookupNameNode(typeNode);
+  return nameNode === null ? undefined : nameNode.text;
+}
+
 function javaBaseLookupNameNode(node: SyntaxNode): SyntaxNode | null {
   switch (node.type) {
     case 'type_identifier':

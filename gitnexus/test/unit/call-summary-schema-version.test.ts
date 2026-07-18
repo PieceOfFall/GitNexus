@@ -73,7 +73,7 @@ describe('CALL_SUMMARY relation-type exclusion (U-C1)', () => {
 });
 
 describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
-  it('INCREMENTAL_SCHEMA_VERSION is bumped to 8 (Kotlin framework annotation evidence)', () => {
+  it('INCREMENTAL_SCHEMA_VERSION is bumped to 8 (Java anonymous-class node-identity re-index window)', () => {
     expect(INCREMENTAL_SCHEMA_VERSION).toBe(8);
   });
 
@@ -95,9 +95,14 @@ describe('CALL_SUMMARY incremental reuse gate (U-C5)', () => {
     // COBOL/JCL/markdown/scope rows are still 1-based, so an incremental top-up
     // would mix bases → must NOT reuse.
     expect(passesReuseGate(5)).toBe(false);
-    // A pre-v7 (v6) index has no Class frameworkAnnotations column.
+    // A pre-v7 (v6) index has no Class frameworkAnnotations column and predates
+    // the callable-value-flow edges (#2437/#2522). Incremental reuse would leave
+    // the annotation inventory incomplete and omit new edges between unchanged
+    // files → must NOT reuse.
     expect(passesReuseGate(6)).toBe(false);
-    // A pre-v8 (v7) index has the column but no Kotlin Bean evidence.
+    // A pre-v8 (v7) index predates the Java anonymous-class instance model
+    // (#2550) — `Worker.run`-keyed Method nodes would be stranded alongside
+    // the re-keyed `Worker$N.run` ones on unchanged files → must NOT reuse.
     expect(passesReuseGate(7)).toBe(false);
     // A current-version stamp passes the gate (incremental top-up eligible).
     expect(passesReuseGate(8)).toBe(true);

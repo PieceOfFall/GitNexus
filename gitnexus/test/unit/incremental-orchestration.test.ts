@@ -600,11 +600,10 @@ describe('runFullAnalysis — incremental orchestration', () => {
     }
   }, 300_000);
 
-  // A v7 index already has the frameworkAnnotations column but predates
-  // Kotlin Bean evidence. Re-analyzing it on the SAME commit must not take the
-  // alreadyUpToDate fast path: the v8 semantic bump has to force a full rebuild
-  // before lastCommit equality can short-circuit the pipeline.
-  it('a v7 schemaVersion stamp forces a full rebuild on an unchanged-commit re-analyze', async () => {
+  // A pre-current index must not take the alreadyUpToDate fast path. The
+  // schema mismatch guard runs before lastCommit equality can short-circuit
+  // the pipeline, so node-identity migrations receive a full rebuild.
+  it('a pre-current schemaVersion stamp forces a full rebuild on an unchanged-commit re-analyze', async () => {
     const repo = await setupMiniRepo();
     try {
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
@@ -615,8 +614,8 @@ describe('runFullAnalysis — incremental orchestration', () => {
       expect(meta).not.toBeNull();
       expect(meta!.schemaVersion).toBe(INCREMENTAL_SCHEMA_VERSION);
 
-      // Simulate a Java-only Bean index at the same commit. Without the v8
-      // guard this would return alreadyUpToDate before parse-cache v14 is read.
+      // Simulate a pre-v8 index at the same commit. Without the schema guard,
+      // this would return alreadyUpToDate before the pipeline runs.
       const downgraded: RepoMeta = { ...meta!, schemaVersion: 7 };
       await saveMeta(storagePath, downgraded);
 

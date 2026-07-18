@@ -355,13 +355,17 @@ export interface RepoMeta {
  * writeback preserves unchanged-file rows, so a top-up against a pre-v6 index
  * would MIX old 1-based rows with new 0-based ones — and the 1-based MCP display
  * would render the stale rows one line too high — so force a full re-analyze.
- * v7: `Class` gained the `frameworkAnnotations` evidence column. Incremental
- * writeback keeps unchanged Class rows, so a pre-v7 top-up would leave that
- * inventory incomplete; force a full re-analyze instead.
- * v8: Spring Bean candidate extraction expanded from Java to Kotlin. The
- * column shape is unchanged, but a clean same-commit v7 index has no Kotlin
- * evidence and would otherwise return `alreadyUpToDate` before parse-cache
- * invalidation runs; force a one-time full rebuild to populate those rows.
+ * v7: callable-value-flow CALLS/USES edges added (#2437/#2522) — new edges can
+ * connect two files whose content did not change, but the incremental write set
+ * only covers changed files (`computeEffectiveWriteSet`), so a top-up against a
+ * pre-v7 index would silently omit the new edges for every unchanged file pair;
+ * force a full re-analyze instead (same contract as v2–v6).
+ * v8: Java anonymous class bodies became first-class Class nodes (#2550):
+ * `new Runnable() { run(){} }` now emits `Class:...:Worker$1` and its methods
+ * re-keyed from `Worker.run` to `Worker$1.run`. Node identities move on
+ * unchanged files — a top-up against a pre-v8 index would strand the old
+ * `Worker.run`-keyed Method nodes alongside the new ones (the v5 Route
+ * precedent); force a full re-analyze instead.
  */
 export const INCREMENTAL_SCHEMA_VERSION = 8;
 

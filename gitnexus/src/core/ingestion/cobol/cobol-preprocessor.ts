@@ -98,15 +98,7 @@ export interface CobolRegexResults {
     cursors: string[];
     hostVariables: string[];
     operation:
-      | 'SELECT'
-      | 'INSERT'
-      | 'UPDATE'
-      | 'DELETE'
-      | 'DECLARE'
-      | 'OPEN'
-      | 'CLOSE'
-      | 'FETCH'
-      | 'OTHER';
+      'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'DECLARE' | 'OPEN' | 'CLOSE' | 'FETCH' | 'OTHER';
     includeMember?: string;
   }>;
   execCicsBlocks: Array<{
@@ -607,7 +599,7 @@ function parseDataItemClauses(rest: string): {
 
   // USAGE [IS] <usage-type> — including non-standard COMP-6, COMP-X etc.
   const usageMatch = text.match(
-    /\bUSAGE\s+(?:IS\s+)?(COMP(?:UTATIONAL)?(?:-[0-9X])?|BINARY|PACKED-DECIMAL|DISPLAY|INDEX|POINTER|NATIONAL)\b/i,
+    /\bUSAGE\s+(?:IS\s+)?(PROCEDURE-POINTER|FUNCTION-POINTER|COMP(?:UTATIONAL)?(?:-[0-9X])?|BINARY|PACKED-DECIMAL|DISPLAY|INDEX|POINTER|NATIONAL)\b/i,
   );
   if (usageMatch) {
     result.usage = usageMatch[1].toUpperCase();
@@ -792,15 +784,7 @@ function parseSelectStatement(stmt: string, startLine: number): FileDeclaration 
 // ---------------------------------------------------------------------------
 
 type SqlOperation =
-  | 'SELECT'
-  | 'INSERT'
-  | 'UPDATE'
-  | 'DELETE'
-  | 'DECLARE'
-  | 'OPEN'
-  | 'CLOSE'
-  | 'FETCH'
-  | 'OTHER';
+  'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'DECLARE' | 'OPEN' | 'CLOSE' | 'FETCH' | 'OTHER';
 
 function parseExecSqlBlock(
   block: string,
@@ -2032,11 +2016,7 @@ export function extractCobolSymbolsWithRegex(
     const arithMatch = lineForArith.match(/\b(COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE)\s+(.+)/i);
     if (arithMatch) {
       const verb = arithMatch[1].toUpperCase() as
-        | 'COMPUTE'
-        | 'ADD'
-        | 'SUBTRACT'
-        | 'MULTIPLY'
-        | 'DIVIDE';
+        'COMPUTE' | 'ADD' | 'SUBTRACT' | 'MULTIPLY' | 'DIVIDE';
       const rest = arithMatch[2].replace(/\..*$/, '').trim();
       let target = '';
       const sources: string[] = [];
