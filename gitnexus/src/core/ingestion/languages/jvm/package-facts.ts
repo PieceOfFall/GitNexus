@@ -1,6 +1,7 @@
 /** Plain-data JVM package fact captured from the language's existing AST. */
 export type JvmPackageFact =
-  { readonly status: 'known'; readonly packageName: string } | { readonly status: 'unknown' };
+  | { readonly status: 'known'; readonly packageName: string }
+  | { readonly status: 'unknown' };
 
 export const UNKNOWN_JVM_PACKAGE_FACT: JvmPackageFact = Object.freeze({ status: 'unknown' });
 
